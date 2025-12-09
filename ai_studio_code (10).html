@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Meeting - Google Host</title>
+    <!-- PeerJS for Video/Chat -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <!-- Firebase for Google Login -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --bg-panel: #1e1e1e;
+            --primary: #6c5ce7;
+            --danger: #ff7675;
+            --text: #ffffff;
+            --chat-width: 300px;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text);
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* --- LOGIN SCREEN --- */
+        #login-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            display: flex; justify-content: center; align-items: center; z-index: 2000;
+        }
+        .login-card {
+            background: var(--bg-panel); padding: 40px; border-radius: 12px;
+            text-align: center; width: 90%; max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .google-btn {
+            background: white; color: #333; display: flex; align-items: center; justify-content: center;
+            gap: 10px; width: 100%; padding: 12px; border-radius: 6px; border: none;
+            font-weight: bold; cursor: pointer; margin-top: 20px;
+        }
+        .google-btn:hover { background: #f1f1f1; }
+        
+        input {
+            width: 100%; padding: 12px; margin: 15px 0; background: #333;
+            border: 1px solid #555; color: white; border-radius: 6px;
+        }
+        .btn {
+            padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer;
+            font-weight: bold; background: var(--primary); color: white; transition: 0.2s;
+            width: 100%;
+        }
+        .btn:hover { opacity: 0.9; }
+
+        /* Hide sections initially */
+        #host-section, #guest-section { display: none; }
+
+        /* --- MAIN APP --- */
+        #app-container {
+            display: none; width: 100%; height: 100%;
+        }
+
+        .main-stage {
+            flex: 1; display: flex; flex-direction: column; position: relative;
+        }
+
+        .header {
+            padding: 10px 20px; background: rgba(0,0,0,0.5);
+            display: flex; justify-content: space-between; align-items: center;
+            position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+        }
+
+        #grid-container {
+            flex: 1; display: flex; flex-wrap: wrap; 
+            justify-content: center; align-items: center; 
+            gap: 15px; padding: 60px 20px 20px 20px; overflow-y: auto;
+        }
+
+        .video-card {
+            position: relative;
+            background: #000; border-radius: 8px; overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            width: 400px; max-width: 100%; aspect-ratio: 16/9;
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        .vid-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0; padding: 8px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+        }
+        .user-name { font-size: 14px; font-weight: 600; text-shadow: 0 1px 2px black; }
+
+        /* Chat Sidebar */
+        .chat-sidebar {
+            width: var(--chat-width); background: var(--bg-panel);
+            border-left: 1px solid #333; display: flex; flex-direction: column;
+        }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .chat-input-area { padding: 15px; border-top: 1px solid #333; display: flex; gap: 10px; }
+        
+        .msg { font-size: 13px; line-height: 1.4; word-wrap: break-word; }
+        .msg b { color: var(--primary); }
+        .sys-msg { color: #888; font-style: italic; font-size: 12px; text-align: center; }
+
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .chat-sidebar { display: none; } 
+            .chat-sidebar.open { display: flex; position: fixed; top:0; right:0; height:100%; z-index:50; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LOGIN UI -->
+    <div id="login-screen">
+        <div class="login-card">
+            <h2><i class="fas fa-video"></i> Pro Meeting</h2>
+            
+            <!-- HOST SECTION (Visible if no link) -->
+            <div id="host-section">
+                <p>Start a new meeting as Host</p>
+                <button class="google-btn" onclick="loginWithGoogle()">
+                    <i class="fab fa-google"></i> Login with Google
+                </button>
+            </div>
+
+            <!-- GUEST SECTION (Visible if joining link) -->
+            <div id="guest-section">
+                <p>Join Meeting</p>
+                <input type="text" id="guest-name" placeholder="Enter your Nickname">
+                <button class="btn" onclick="joinAsGuest()">Join Now</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP UI -->
+    <div id="app-container">
+        <div class="main-stage">
+            <div class="header">
+                <div>
+                    <span id="room-status" style="font-size:14px; color:#aaa;">Connecting...</span>
+                    <button class="btn" style="padding: 5px 10px; font-size: 12px; margin-left: 10px;" onclick="copyLink()">
+                        <i class="fas fa-link"></i> Copy Invite
+                    </button>
+                </div>
+                <button class="btn" onclick="toggleChat()" style="width:auto; padding:5px 10px;">
+                    <i class="fas fa-comment-alt"></i>
+                </button>
+            </div>
+            <div id="grid-container"></div>
+        </div>
+
+        <div class="chat-sidebar" id="chat-sidebar">
+            <div style="padding:15px; border-bottom:1px solid #333; font-weight:bold;">Chat</div>
+            <div class="chat-messages" id="chat-box">
+                <div class="sys-msg">Messages are temporary.</div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Type..." style="margin:0">
+                <button class="btn" onclick="sendChat()" style="width:auto"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ---------------------------------------------------------
+        // 1. FIREBASE CONFIGURATION (REPLACE WITH YOUR KEYS)
+        // ---------------------------------------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyDxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            authDomain: "your-project-id.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef123456"
+        };
+        
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const provider = new firebase.auth.GoogleAuthProvider();
+
+        // ---------------------------------------------------------
+        // 2. GLOBAL VARIABLES
+        // ---------------------------------------------------------
+        const peerConfig = {
+            debug: 1,
+            config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+        };
+        let peer, myId, myName, myStream;
+        let activeCalls = {};
+        let activeConns = {};
+        
+        // Check URL for Room ID
+        const urlParams = new URLSearchParams(window.location.search);
+        let roomId = urlParams.get('room');
+
+        // ---------------------------------------------------------
+        // 3. LOGIN FLOW LOGIC
+        // ---------------------------------------------------------
+        window.onload = () => {
+            if (roomId) {
+                // User is a Guest
+                document.getElementById('guest-section').style.display = 'block';
+            } else {
+                // User is a potential Host
+                document.getElementById('host-section').style.display = 'block';
+            }
+        };
+
+        // HOST LOGIN
+        function loginWithGoogle() {
+            auth.signInWithPopup(provider).then((result) => {
+                const user = result.user;
+                myName = user.displayName;
+                // We use the Google UID as the Room ID
+                // Remove special chars to make it URL safe for PeerJS
+                const cleanUid = user.uid.replace(/[^a-zA-Z0-9]/g, '');
+                myId = "host_" + cleanUid; 
+                
+                // Start Meeting
+                startApp(true);
+            }).catch((error) => {
+                alert("Login Failed: " + error.message);
+            });
+        }
+
+        // GUEST LOGIN
+        function joinAsGuest() {
+            const input = document.getElementById('guest-name');
+            if(!input.value) return alert("Nickname required");
+            myName = input.value;
+            
+            // Random ID for guest
+            myId = "guest_" + Math.random().toString(36).substr(2, 9);
+            
+            startApp(false);
+        }
+
+        // ---------------------------------------------------------
+        // 4. MAIN APP LOGIC (PeerJS)
+        // ---------------------------------------------------------
+        async function startApp(isHost) {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+            document.getElementById('room-status').innerText = isHost ? "You are Host" : "Guest";
+
+            // 1. Update URL if Host
+            if (isHost) {
+                const cleanId = myId.replace('host_', ''); // Only show the clean UID in URL usually, but for PeerJS we need exact match.
+                // Let's keep logic simple: PeerID = HostUID
+                window.history.pushState({}, '', '?room=' + myId);
+                roomId = myId;
+            }
+
+            try {
+                // 2. Get Media
+                myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                
+                // 3. Start Peer
+                peer = new Peer(myId, peerConfig);
+
+                peer.on('open', id => {
+                    console.log("Connected with ID:", id);
+                    addVideo(myStream, myName, id, true);
+
+                    // If Guest, connect to Host immediately
+                    if (!isHost && roomId) {
+                        connectToPeer(roomId);
+                    }
+                });
+
+                // Incoming Call (Video)
+                peer.on('call', call => {
+                    call.answer(myStream);
+                    call.on('stream', remoteStream => {
+                        // Fix for Metadata issue: create temporary name or wait for data conn
+                        addVideo(remoteStream, "Participant", call.peer, false);
+                    });
+                });
+
+                // Incoming Data (Chat)
+                peer.on('connection', conn => {
+                    setupConn(conn);
+                });
+
+                peer.on('error', err => {
+                    if(err.type === 'peer-unavailable') alert("Host is not online or wrong link.");
+                });
+
+            } catch (err) {
+                alert("Camera Access Denied: " + err);
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 5. CONNECTIONS (Mesh / Star Hybrid)
+        // ---------------------------------------------------------
+        function connectToPeer(targetId) {
+            // Data
+            const conn = peer.connect(targetId, { metadata: { name: myName } });
+            setupConn(conn);
+
+            // Video
+            const call = peer.call(targetId, myStream);
+            call.on('stream', remoteStream => {
+                addVideo(remoteStream, "Participant", targetId, false);
+            });
+        }
+
+        function setupConn(conn) {
+            activeConns[conn.peer] = conn;
+
+            conn.on('open', () => {
+                // Send my name immediately
+                conn.send({ type: 'name-update', name: myName });
+
+                // If I am Host, send list of other peers to new guest
+                if (myId === roomId) {
+                    const others = Object.keys(activeConns).filter(id => id !== conn.peer);
+                    if(others.length > 0) conn.send({ type: 'peer-list', peers: others });
+                }
+            });
+
+            conn.on('data', data => {
+                if (data.type === 'chat') addChat(data.sender, data.msg);
+                if (data.type === 'peer-list') {
+                    data.peers.forEach(pid => connectToPeer(pid));
+                }
+                if (data.type === 'name-update') {
+                    updateName(conn.peer, data.name);
+                }
+            });
+
+            conn.on('close', () => {
+                document.getElementById(`vid-${conn.peer}`)?.remove();
+                delete activeConns[conn.peer];
+            });
+        }
+
+        // ---------------------------------------------------------
+        // 6. UI HELPERS (Video, Chat, Utils)
+        // ---------------------------------------------------------
+        function addVideo(stream, name, id, isLocal) {
+            if(document.getElementById(`vid-${id}`)) return;
+
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.id = `vid-${id}`;
+
+            const vid = document.createElement('video');
+            vid.srcObject = stream;
+            vid.autoplay = true; 
+            vid.playsInline = true;
+            vid.muted = isLocal; // Mute self, unmute others
+
+            const overlay = document.createElement('div');
+            overlay.className = 'vid-overlay';
+            overlay.innerHTML = `<span class="user-name" id="name-${id}">${isLocal ? name + " (You)" : name}</span>`;
+
+            card.appendChild(vid);
+            card.appendChild(overlay);
+            document.getElementById('grid-container').appendChild(card);
+        }
+
+        function updateName(id, newName) {
+            const el = document.getElementById(`name-${id}`);
+            if(el) el.innerText = newName;
+        }
+
+        function sendChat() {
+            const input = document.getElementById('chat-input');
+            const msg = input.value;
+            if(!msg) return;
+
+            addChat("You", msg, true);
+            Object.values(activeConns).forEach(conn => {
+                if(conn.open) conn.send({ type: 'chat', msg: msg, sender: myName });
+            });
+            input.value = '';
+        }
+
+        function addChat(sender, msg, self=false) {
+            const box = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = 'msg';
+            div.style.color = self ? '#ccc' : '#fff';
+            div.innerHTML = `<b>${sender}:</b> ${msg}`;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function copyLink() {
+            const url = window.location.href.split('?')[0] + '?room=' + roomId;
+            navigator.clipboard.writeText(url);
+            alert("Invite Link Copied!");
+        }
+
+        function toggleChat() {
+            document.getElementById('chat-sidebar').classList.toggle('open');
+        }
+        
+        // Fix for black screen playback
+        document.addEventListener('click', () => {
+            document.querySelectorAll('video').forEach(v => v.play().catch(e=>{}));
+        }, {once:true});
+
+    </script>
+</body>
+</html>
