@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zoom Clone V7 - Pro Media Suite</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #090909;
+            --panel-bg: rgba(28, 28, 28, 0.95);
+            --accent: #2D8CFF;
+            --danger: #FF443B;
+            --text-gray: #B0B0B0;
+            --toolbar-height: 75px;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-dark);
+            color: white;
+            margin: 0;
+            height: 100dvh; 
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* --- UI COMPONENTS --- */
+        .btn-primary {
+            background: var(--accent); color: white; border: none;
+            padding: 14px; border-radius: 12px; font-weight: 600; font-size: 16px;
+            width: 100%; cursor: pointer; transition: 0.2s;
+        }
+        .btn-primary:active { transform: scale(0.98); opacity: 0.9; }
+
+        /* Login Screen */
+        #login-screen {
+            position: fixed; inset: 0; background: #000;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 3000;
+        }
+        .login-card {
+            width: 85%; max-width: 320px; text-align: center;
+        }
+        .login-card input {
+            width: 100%; padding: 15px; margin: 15px 0; background: #1A1A1A; 
+            color: white; border-radius: 12px; border: 1px solid #333; outline: none; font-size: 16px;
+        }
+
+        /* Notifications */
+        #notification-area {
+            position: fixed; top: 10px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+            z-index: 5000; pointer-events: none;
+        }
+        .notif-pill {
+            background: rgba(40, 40, 40, 0.9); backdrop-filter: blur(10px);
+            color: #fff; padding: 10px 20px; border-radius: 30px;
+            font-size: 13px; font-weight: 500;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            animation: slideDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,0.1);
+        }
+        @keyframes slideDown { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* Main App Area */
+        #app-container {
+            display: none; flex: 1; position: relative;
+            overflow-x: auto; overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            display: flex; scroll-behavior: smooth;
+        }
+        .page {
+            min-width: 100vw; height: 100%;
+            scroll-snap-align: start; position: relative;
+            padding-bottom: var(--toolbar-height);
+        }
+
+        /* Speaker View (16:9 Container) */
+        #page-speaker { background: #000; display: flex; justify-content: center; align-items: center; }
+        #speaker-video-container {
+            width: 100%; aspect-ratio: 16/9; max-width: 1000px;
+            position: relative; background: #111;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        #speaker-video { width: 100%; height: 100%; object-fit: contain; }
+        .speaker-label {
+            position: absolute; bottom: 15px; left: 15px;
+            background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 6px; 
+            font-size: 12px; font-weight: 600; backdrop-filter: blur(4px);
+        }
+
+        /* Gallery Grid */
+        #page-gallery {
+            background: var(--bg-dark); display: flex; flex-wrap: wrap; 
+            align-content: flex-start; padding: 15px; gap: 10px; overflow-y: auto;
+            padding-top: 60px;
+        }
+        .video-card {
+            position: relative; background: #222; border-radius: 12px; overflow: hidden;
+            border: 1px solid #333; aspect-ratio: 16/9; width: 48%; 
+            display: flex; justify-content: center; align-items: center;
+        }
+        @media (min-width: 768px) { .video-card { width: 32%; } }
+        .video-card video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+        .card-name {
+            position: absolute; bottom: 8px; left: 8px; font-size: 10px; 
+            background: rgba(0,0,0,0.7); padding: 3px 8px; border-radius: 4px;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            height: var(--toolbar-height); background: rgba(20, 20, 20, 0.9);
+            backdrop-filter: blur(15px);
+            position: fixed; bottom: 0; width: 100%;
+            display: flex; align-items: center; justify-content: space-around;
+            padding: 0 15px; border-top: 1px solid #333; z-index: 100;
+        }
+        .tool-btn {
+            background: none; border: none; color: #888;
+            display: flex; flex-direction: column; align-items: center;
+            font-size: 10px; cursor: pointer; padding: 8px; transition: 0.2s;
+        }
+        .tool-btn i { font-size: 22px; margin-bottom: 5px; }
+        .tool-btn.active { color: white; }
+        .tool-btn.danger { color: var(--danger); }
+        .tool-btn:active { transform: scale(0.9); }
+
+        /* --- MENUS (Action Sheet Style) --- */
+        .overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6); 
+            z-index: 2000; opacity: 0; pointer-events: none; transition: 0.3s;
+        }
+        .overlay.show { opacity: 1; pointer-events: auto; }
+
+        .bottom-sheet {
+            position: fixed; bottom: -100%; left: 0; width: 100%;
+            background: var(--panel-bg); border-radius: 20px 20px 0 0;
+            padding: 25px; transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1);
+            z-index: 2100; backdrop-filter: blur(20px); border-top: 1px solid #333;
+            max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column;
+        }
+        .bottom-sheet.show { bottom: 0; }
+
+        .sheet-handle {
+            width: 40px; height: 4px; background: #444; 
+            border-radius: 2px; margin: 0 auto 20px auto;
+        }
+        .sheet-title {
+            font-size: 18px; font-weight: bold; margin-bottom: 20px; color: white;
+        }
+
+        /* Menu Grid for Media */
+        .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .menu-btn {
+            background: #333; border: 1px solid #444; color: white;
+            padding: 20px; border-radius: 15px; text-align: center;
+            cursor: pointer; transition: 0.2s; display: flex; flex-direction: column; align-items: center; gap: 10px;
+        }
+        .menu-btn i { font-size: 24px; color: var(--accent); }
+        .menu-btn span { font-size: 13px; font-weight: 500; }
+        .menu-btn:active { transform: scale(0.96); background: #444; }
+        
+        .menu-list-btn {
+            width: 100%; background: none; border: none; text-align: left;
+            padding: 15px 0; border-bottom: 1px solid #333; color: white;
+            font-size: 16px; display: flex; align-items: center; gap: 15px;
+        }
+        .menu-list-btn i { width: 25px; color: #888; text-align: center;}
+
+        /* Chat Panel */
+        #chat-panel {
+            position: fixed; inset: 0; background: #121212; z-index: 2500;
+            transform: translateX(100%); transition: 0.3s; display: flex; flex-direction: column;
+        }
+        #chat-panel.open { transform: translateX(0); }
+        .chat-header {
+            padding: 15px; border-bottom: 1px solid #333; background: #1a1a1a;
+            display: flex; align-items: center; gap: 15px; font-weight: bold;
+        }
+        .chat-area { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .chat-bubble {
+            background: #2a2a2a; padding: 10px 14px; border-radius: 12px;
+            max-width: 80%; font-size: 14px; line-height: 1.4;
+        }
+        .chat-bubble.me { background: var(--accent); align-self: flex-end; }
+        .chat-meta { font-size: 11px; color: #777; margin-bottom: 4px; }
+        .chat-input-bar {
+            padding: 10px; background: #1a1a1a; display: flex; gap: 10px; border-top: 1px solid #333;
+        }
+        .chat-input-bar input {
+            flex: 1; background: #333; border: none; padding: 10px; border-radius: 20px; color: white; outline: none;
+        }
+
+        /* Invite Badge */
+        #invite-pill {
+            position: fixed; top: 15px; left: 15px; z-index: 500;
+            background: rgba(30,30,30,0.6); backdrop-filter: blur(5px);
+            padding: 6px 12px; border-radius: 20px; font-size: 12px;
+            border: 1px solid #444; cursor: pointer; display: flex; align-items: center; gap: 5px;
+        }
+
+        /* Hidden Processing */
+        .hidden-assets { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- Hidden Processors -->
+    <div class="hidden-assets">
+        <!-- Sources -->
+        <video id="local-raw-video" autoplay playsinline muted></video>
+        <video id="shared-video-file" playsinline loop muted crossorigin="anonymous"></video>
+        <img id="shared-photo-file" crossorigin="anonymous">
+        <img id="frame-overlay-file" crossorigin="anonymous">
+        
+        <!-- Output -->
+        <canvas id="broadcast-canvas"></canvas>
+        
+        <!-- Inputs -->
+        <input type="file" id="inp-video" accept="video/mp4, video/webm">
+        <input type="file" id="inp-photo" accept="image/*">
+        <input type="file" id="inp-frame" accept="image/png">
+    </div>
+
+    <!-- 1. LOGIN SCREEN -->
+    <div id="login-screen">
+        <div class="login-card">
+            <div style="width:60px; height:60px; background:#222; border-radius:15px; margin:0 auto 20px auto; display:flex; align-items:center; justify-content:center;">
+                <i class="fas fa-video" style="font-size:24px; color:var(--accent);"></i>
+            </div>
+            <h2 style="margin:0;">Join Meeting</h2>
+            <p style="color:#777; font-size:14px; margin-top:5px;">Professional 16:9 Broadcast</p>
+            <input type="text" id="username" placeholder="Enter your name">
+            <button class="btn-primary" onclick="initApp()">Enter Room</button>
+        </div>
+    </div>
+
+    <!-- 2. MAIN APP -->
+    <div id="invite-pill" onclick="copyLink()"><i class="fas fa-link"></i> <span>Invite ID</span></div>
+    <div id="notification-area"></div>
+
+    <div id="app-container" onscroll="handleScroll()">
+        <!-- Page 1: Active Speaker -->
+        <div class="page" id="page-speaker">
+            <div id="speaker-video-container">
+                <video id="speaker-video" autoplay playsinline></video>
+                <div class="speaker-label" id="speaker-name">Waiting...</div>
+            </div>
+        </div>
+        <!-- Page 2: Grid -->
+        <div class="page" id="page-gallery"></div>
+    </div>
+
+    <!-- 3. MENUS -->
+    
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <button class="tool-btn" onclick="toggleMute()" id="btn-audio">
+            <i class="fas fa-microphone"></i> <span>Mute</span>
+        </button>
+        <button class="tool-btn" onclick="toggleCam()" id="btn-video">
+            <i class="fas fa-video"></i> <span>Cam</span>
+        </button>
+        <button class="tool-btn" onclick="openMenu()">
+            <i class="fas fa-ellipsis-h"></i> <span>More</span>
+        </button>
+        <button class="tool-btn danger" onclick="location.reload()">
+            <i class="fas fa-phone-slash"></i> <span>Leave</span>
+        </button>
+    </div>
+
+    <!-- Main Menu Bottom Sheet -->
+    <div class="overlay" id="menu-overlay" onclick="closeMenu()"></div>
+    <div class="bottom-sheet" id="main-menu">
+        <div class="sheet-handle"></div>
+        
+        <div class="sheet-title">Media Controls</div>
+        <div class="menu-grid">
+            <div class="menu-btn" onclick="triggerFile('inp-video')">
+                <i class="fas fa-film"></i> <span>Share Video</span>
+            </div>
+            <div class="menu-btn" onclick="triggerFile('inp-photo')">
+                <i class="fas fa-image"></i> <span>Share Photo</span>
+            </div>
+            <div class="menu-btn" onclick="triggerFile('inp-frame')">
+                <i class="fas fa-crop-simple"></i> <span>Add Frame</span>
+            </div>
+            <div class="menu-btn" onclick="resetSource()">
+                <i class="fas fa-camera-rotate"></i> <span>Reset Cam</span>
+            </div>
+        </div>
+
+        <div class="sheet-title" style="margin-top:25px; font-size:16px; color:#888;">Meeting Tools</div>
+        <button class="menu-list-btn" onclick="openChat()">
+            <i class="fas fa-comment-alt"></i> Chat Room
+        </button>
+        <button class="menu-list-btn" onclick="toggleParticipants()">
+            <i class="fas fa-users"></i> Participants List (<span id="part-count">0</span>)
+        </button>
+    </div>
+
+    <!-- Chat Panel -->
+    <div id="chat-panel">
+        <div class="chat-header">
+            <i class="fas fa-arrow-left" onclick="closeChat()" style="cursor:pointer; padding:5px;"></i>
+            <span>Group Chat</span>
+        </div>
+        <div class="chat-area" id="chat-feed">
+            <div style="text-align:center; color:#555; font-size:12px; margin-top:20px;">
+                Welcome to the chat. Messages are ephemeral.
+            </div>
+        </div>
+        <div class="chat-input-bar">
+            <input type="text" id="chat-msg-in" placeholder="Type a message...">
+            <button style="background:var(--accent); color:white; border:none; width:40px; height:40px; border-radius:50%;" onclick="sendChat()">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIG & STATE ---
+        let peer, myId, myName;
+        let connections = {}, streams = {}, meta = {};
+        
+        // Media State
+        let canvasStream;
+        let isAudioOn = true, isVideoOn = true;
+        
+        // Compositor State
+        let activeSource = 'camera'; // 'camera', 'video', 'image'
+        let hasFrame = false;
+        
+        // DOM Elements
+        const rawVideo = document.getElementById('local-raw-video');
+        const sharedVideo = document.getElementById('shared-video-file');
+        const sharedPhoto = document.getElementById('shared-photo-file');
+        const frameImg = document.getElementById('frame-overlay-file');
+        const canvas = document.getElementById('broadcast-canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        
+        // --- INITIALIZATION ---
+        async function initApp() {
+            const nameInput = document.getElementById('username');
+            if(!nameInput.value) return alert("Please enter your name");
+            myName = nameInput.value;
+
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+
+            try {
+                // 1. Get Camera (Prefer HD)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+                    audio: { echoCancellation: true }
+                });
+                rawVideo.srcObject = stream;
+                
+                // 2. Start Compositor Engine
+                startCompositor();
+
+                // 3. Create Stream from Canvas (30fps)
+                canvasStream = canvas.captureStream(30);
+                if(stream.getAudioTracks().length) {
+                    canvasStream.addTrack(stream.getAudioTracks()[0]);
+                }
+                
+                // 4. Local Display
+                streams['me'] = canvasStream;
+                meta['me'] = { name: myName + " (You)" };
+                renderGallery();
+                updateMainSpeaker('me');
+
+                // 5. Connect to Network
+                initPeer();
+
+            } catch(e) {
+                alert("Camera Error: " + e.message);
+            }
+        }
+
+        // --- COMPOSITOR ENGINE (THE MAGIC) ---
+        function startCompositor() {
+            // Force 16:9 Landscape Resolution (HD 720p equivalent scale)
+            const W = 640; 
+            const H = 360;
+            canvas.width = W; 
+            canvas.height = H;
+
+            function loop() {
+                // 1. Background
+                ctx.fillStyle = "#000";
+                ctx.fillRect(0,0,W,H);
+
+                // 2. Draw Active Source
+                if(activeSource === 'camera') {
+                    if(isVideoOn) drawCover(ctx, rawVideo, W, H, true); // True = Mirror
+                    else drawAvatar(ctx, W, H);
+                }
+                else if(activeSource === 'video') {
+                    drawCover(ctx, sharedVideo, W, H, false);
+                }
+                else if(activeSource === 'image') {
+                    drawContain(ctx, sharedPhoto, W, H);
+                }
+
+                // 3. Draw Frame Overlay (Top Layer)
+                if(hasFrame) {
+                    ctx.drawImage(frameImg, 0, 0, W, H);
+                }
+
+                requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        // Helper: Draw video/image covering the canvas (Object-fit: Cover)
+        function drawCover(ctx, source, W, H, mirror) {
+            const sW = source.videoWidth || source.naturalWidth || 1;
+            const sH = source.videoHeight || source.naturalHeight || 1;
+            if(sW < 5) return; // Not ready
+
+            const srcRatio = sW / sH;
+            const dstRatio = W / H;
+            let dw, dh, dx, dy;
+
+            if(srcRatio > dstRatio) {
+                dh = H; dw = H * srcRatio;
+                dy = 0; dx = (W - dw) / 2;
+            } else {
+                dw = W; dh = W / dstRatio;
+                dx = 0; dy = (H - dh) / 2;
+            }
+
+            ctx.save();
+            if(mirror) {
+                ctx.translate(W, 0);
+                ctx.scale(-1, 1);
+            }
+            ctx.drawImage(source, dx, dy, dw, dh);
+            ctx.restore();
+        }
+
+        // Helper: Draw image contained (Object-fit: Contain)
+        function drawContain(ctx, img, W, H) {
+            const sW = img.naturalWidth;
+            const sH = img.naturalHeight;
+            const scale = Math.min(W/sW, H/sH);
+            const w = sW * scale;
+            const h = sH * scale;
+            ctx.drawImage(img, (W-w)/2, (H-h)/2, w, h);
+        }
+
+        function drawAvatar(ctx, W, H) {
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(0,0,W,H);
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 40px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(myName.charAt(0).toUpperCase(), W/2, H/2);
+        }
+
+        // --- MEDIA HANDLERS ---
+        function triggerFile(id) { document.getElementById(id).click(); }
+        
+        document.getElementById('inp-video').onchange = (e) => {
+            const f = e.target.files[0];
+            if(f) {
+                sharedVideo.src = URL.createObjectURL(f);
+                sharedVideo.play();
+                activeSource = 'video';
+                closeMenu();
+                showNotif("Playing Shared Video");
+            }
+        };
+        document.getElementById('inp-photo').onchange = (e) => {
+            const f = e.target.files[0];
+            if(f) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    sharedPhoto.src = ev.target.result;
+                    activeSource = 'image';
+                    closeMenu();
+                    showNotif("Sharing Photo");
+                };
+                reader.readAsDataURL(f);
+            }
+        };
+        document.getElementById('inp-frame').onchange = (e) => {
+            const f = e.target.files[0];
+            if(f) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    frameImg.src = ev.target.result;
+                    hasFrame = true;
+                    closeMenu();
+                    showNotif("Frame Overlay Added");
+                };
+                reader.readAsDataURL(f);
+            }
+        };
+
+        function resetSource() {
+            activeSource = 'camera';
+            hasFrame = false;
+            sharedVideo.pause();
+            closeMenu();
+            showNotif("Camera Restored");
+        }
+
+        // --- PEERJS LOGIC ---
+        function initPeer() {
+            peer = new Peer(undefined, { debug: 1 });
+            peer.on('open', id => {
+                myId = id;
+                const urlParams = new URLSearchParams(window.location.search);
+                const room = urlParams.get('room');
+                if(room) connectToHost(room);
+                else {
+                    const newUrl = window.location.pathname + "?room=" + id;
+                    window.history.replaceState(null, null, newUrl);
+                    showNotif("You started the meeting");
+                }
+            });
+            peer.on('connection', conn => setupConn(conn));
+            peer.on('call', call => handleCall(call));
+        }
+
+        function connectToHost(hostId) {
+            const conn = peer.connect(hostId);
+            setupConn(conn);
+        }
+
+        function setupConn(conn) {
+            connections[conn.peer] = conn;
+            conn.on('open', () => {
+                conn.send({ type: 'join', name: myName });
+                if(!streams[conn.peer]) {
+                    const call = peer.call(conn.peer, canvasStream, { metadata: { name: myName }});
+                    handleCall(call);
+                }
+            });
+            conn.on('data', data => handleData(conn.peer, data));
+            conn.on('close', () => removeUser(conn.peer));
+        }
+
+        function handleCall(call) {
+            call.answer(canvasStream);
+            call.on('stream', remoteStream => {
+                streams[call.peer] = remoteStream;
+                if(!meta[call.peer]) meta[call.peer] = { name: "Guest" };
+                renderGallery();
+                // If 2nd person, show them automatically
+                if(Object.keys(streams).length === 2) updateMainSpeaker(call.peer);
+            });
+        }
+
+        function handleData(id, data) {
+            if(data.type === 'join') {
+                meta[id] = { name: data.name };
+                showNotif(`${data.name} Joined`);
+                renderGallery();
+            }
+            if(data.type === 'chat') {
+                addChat(data.name, data.msg, false);
+            }
+        }
+
+        function removeUser(id) {
+            delete streams[id];
+            delete connections[id];
+            delete meta[id];
+            renderGallery();
+            updateMainSpeaker('me');
+            showNotif("User Left", true);
+        }
+
+        // --- UI LOGIC ---
+        function updateMainSpeaker(id) {
+            const video = document.getElementById('speaker-video');
+            if(streams[id]) {
+                video.srcObject = streams[id];
+                document.getElementById('speaker-name').innerText = meta[id].name;
+                video.muted = (id === 'me'); 
+            }
+        }
+
+        function renderGallery() {
+            const gal = document.getElementById('page-gallery');
+            gal.innerHTML = '';
+            const ids = Object.keys(streams);
+            document.getElementById('part-count').innerText = ids.length;
+
+            ids.forEach(id => {
+                const el = document.createElement('div');
+                el.className = 'video-card';
+                el.onclick = () => { updateMainSpeaker(id); document.getElementById('app-container').scrollTo({left:0, behavior:'smooth'}); };
+                
+                const v = document.createElement('video');
+                v.srcObject = streams[id];
+                v.autoplay = true; v.playsInline = true; v.muted = true;
+                
+                const n = document.createElement('div');
+                n.className = 'card-name';
+                n.innerText = meta[id]?.name || "User";
+                
+                el.append(v, n);
+                gal.appendChild(el);
+            });
+        }
+
+        function showNotif(msg, isAlert=false) {
+            const area = document.getElementById('notification-area');
+            const el = document.createElement('div');
+            el.className = 'notif-pill';
+            el.innerHTML = `<i class="fas ${isAlert ? 'fa-exclamation-circle' : 'fa-info-circle'}" style="color:${isAlert ? 'var(--danger)' : 'var(--accent)'}"></i> ${msg}`;
+            area.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                el.style.transform = 'translateY(-20px)';
+                setTimeout(() => el.remove(), 400);
+            }, 3000);
+        }
+
+        function sendChat() {
+            const inp = document.getElementById('chat-msg-in');
+            const msg = inp.value.trim();
+            if(!msg) return;
+            addChat('Me', msg, true);
+            Object.values(connections).forEach(c => c.send({type:'chat', name:myName, msg:msg}));
+            inp.value = '';
+        }
+
+        function addChat(name, msg, isMe) {
+            const area = document.getElementById('chat-feed');
+            const b = document.createElement('div');
+            b.className = `chat-bubble ${isMe ? 'me' : ''}`;
+            b.innerHTML = `<div class="chat-meta">${name}</div>${msg}`;
+            area.appendChild(b);
+            area.scrollTop = area.scrollHeight;
+        }
+
+        // Menu Toggles
+        function openMenu() { 
+            document.getElementById('menu-overlay').classList.add('show');
+            document.getElementById('main-menu').classList.add('show');
+        }
+        function closeMenu() {
+            document.getElementById('menu-overlay').classList.remove('show');
+            document.getElementById('main-menu').classList.remove('show');
+        }
+        function openChat() { closeMenu(); document.getElementById('chat-panel').classList.add('open'); }
+        function closeChat() { document.getElementById('chat-panel').classList.remove('open'); }
+        
+        function toggleParticipants() {
+            closeMenu();
+            alert("Participants List: \n" + Object.keys(meta).map(k => meta[k].name).join('\n'));
+        }
+
+        function toggleMute() {
+            isAudioOn = !isAudioOn;
+            document.getElementById('btn-audio').classList.toggle('danger', !isAudioOn);
+            if(canvasStream.getAudioTracks()[0]) canvasStream.getAudioTracks()[0].enabled = isAudioOn;
+        }
+        function toggleCam() {
+            isVideoOn = !isVideoOn;
+            document.getElementById('btn-video').classList.toggle('danger', !isVideoOn);
+            // Note: Compositor handles the black screen drawing automatically based on isVideoOn flag
+        }
+        function copyLink() {
+            navigator.clipboard.writeText(window.location.href);
+            showNotif("Link Copied!");
+        }
+        function handleScroll() {
+            // Optional: Add paging dots logic here if desired
+        }
+    </script>
+</body>
+</html>
