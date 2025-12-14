@@ -1,0 +1,654 @@
+<!-- --- START OF FILE ai_studio_code (38).html --- -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zoom Clone V5 - Vertical Fix</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --zoom-black: #000000;
+            --accent: #0E72ED;
+            --danger: #E02828;
+            --toolbar-height: 70px;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: var(--zoom-black);
+            color: white;
+            margin: 0;
+            height: 100dvh; 
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* --- LOGIN --- */
+        #login-screen {
+            position: fixed; inset: 0; background: #1a1a1a;
+            display: flex; justify-content: center; align-items: center; z-index: 3000;
+        }
+        .login-card {
+            background: #242424; padding: 30px; border-radius: 12px;
+            text-align: center; width: 90%; max-width: 350px;
+        }
+        .btn-primary {
+            background: var(--accent); color: white; border: none;
+            padding: 12px; border-radius: 8px; font-weight: 600; width: 100%; cursor: pointer; margin-top: 10px;
+        }
+        input {
+            width: 100%; padding: 12px; margin: 10px 0; background: #fff; border-radius: 6px; border:none; outline: none;
+        }
+
+        /* --- INVITE BUTTON --- */
+        #invite-badge {
+            position: fixed; top: 20px; left: 20px; z-index: 2500;
+            background: rgba(30, 30, 30, 0.85); color: #fff;
+            border: 1px solid #444; border-radius: 30px;
+            padding: 8px 16px; font-size: 13px; font-weight: 600;
+            cursor: pointer; display: none;
+            align-items: center; gap: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            backdrop-filter: blur(5px);
+        }
+        #invite-badge:active { transform: scale(0.95); }
+        #invite-badge i { color: #2ecc71; }
+
+        /* --- TOAST --- */
+        #toast {
+            position: fixed; top: -60px; left: 50%; transform: translateX(-50%);
+            background: var(--accent); color: white; padding: 12px 25px;
+            border-radius: 30px; font-weight: 600; font-size: 14px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 4000;
+            transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #toast.show { top: 30px; }
+
+        /* --- APP SWIPER LAYOUT --- */
+        #app-container {
+            display: none; flex: 1; position: relative;
+            overflow-x: auto; overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            display: flex; scroll-behavior: smooth;
+        }
+        
+        /* The Pages */
+        .page {
+            min-width: 100vw; height: 100%;
+            scroll-snap-align: start;
+            position: relative;
+            padding-bottom: var(--toolbar-height);
+        }
+
+        /* PAGE 1: SPEAKER VIEW (PINNED) */
+        #page-speaker {
+            background: #000;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #speaker-video-container {
+            /* Vertical Aspect Ratio Container */
+            width: 100%; height: 100%; 
+            aspect-ratio: 9/16;
+            max-width: 450px; /* Limit width on desktop */
+            position: relative; display: flex; justify-content: center; align-items: center;
+        }
+        #speaker-video {
+            width: 100%; height: 100%; object-fit: contain; /* Contain ensures full 9:16 is seen */
+        }
+        .speaker-label {
+            position: absolute; bottom: 80px; left: 20px;
+            background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 4px;
+        }
+        .pinned-frame-border {
+            border: 4px solid var(--accent);
+            box-shadow: 0 0 20px var(--accent);
+        }
+
+        /* PAGE 2: GALLERY VIEW */
+        #page-gallery {
+            background: #1a1a1a;
+            display: flex; flex-wrap: wrap; align-content: flex-start;
+            padding: 10px; gap: 10px; overflow-y: auto;
+            padding-top: 60px; 
+        }
+        .dots-indicator {
+            position: fixed; bottom: 80px; left: 0; right: 0;
+            display: flex; justify-content: center; gap: 8px; pointer-events: none; z-index: 50;
+        }
+        .dot { width: 8px; height: 8px; background: #555; border-radius: 50%; transition: 0.3s; }
+        .dot.active { background: white; }
+
+        /* VIDEO CARDS (Gallery) */
+        .video-card {
+            position: relative; background: #222; border-radius: 8px; overflow: hidden;
+            border: 1px solid #333; 
+            /* FIX: 9/16 Aspect Ratio for Vertical Cards */
+            aspect-ratio: 9/16;
+            width: 48%; 
+            display: flex; justify-content: center; align-items: center;
+        }
+        @media (min-width: 768px) { .video-card { width: 23%; } } /* Smaller cards on desktop to fit more */
+
+        .video-card video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+        
+        .card-name {
+            position: absolute; bottom: 5px; left: 5px;
+            font-size: 11px; background: rgba(0,0,0,0.7); padding: 2px 6px; border-radius: 4px;
+        }
+        .card-menu-btn {
+            position: absolute; top: 5px; right: 5px;
+            background: rgba(0,0,0,0.5); border: none; color: white;
+            width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+        }
+
+        /* --- TOOLBAR --- */
+        .toolbar {
+            height: var(--toolbar-height); background: #121212;
+            position: fixed; bottom: 0; width: 100%;
+            display: flex; align-items: center; justify-content: space-around;
+            padding: 0 10px; border-top: 1px solid #333; z-index: 100;
+        }
+        .tool-btn {
+            background: none; border: none; color: #aaa;
+            display: flex; flex-direction: column; align-items: center;
+            font-size: 10px; cursor: pointer; padding: 5px;
+        }
+        .tool-btn i { font-size: 20px; margin-bottom: 4px; }
+        .tool-btn.active { color: var(--accent); }
+        .tool-btn.danger { color: #ff4444; }
+
+        /* --- ACTION SHEET / MENU --- */
+        #action-sheet {
+            position: fixed; bottom: -100%; left: 0; width: 100%;
+            background: #242424; border-radius: 15px 15px 0 0;
+            padding: 20px; transition: 0.3s; z-index: 200;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        #action-sheet.show { bottom: 0; }
+        .action-btn {
+            background: #333; border: none; color: white; padding: 15px;
+            border-radius: 8px; font-size: 16px; text-align: left; cursor: pointer;
+        }
+        .action-btn i { width: 30px; }
+        .overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+            display: none; z-index: 150;
+        }
+
+        /* --- HIDDEN ASSETS --- */
+        .hidden-assets { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- Hidden Processing -->
+    <div class="hidden-assets">
+        <video id="local-raw-video" autoplay playsinline muted></video>
+        <img id="shared-photo-img" crossorigin="anonymous">
+        <img id="frame-overlay-img" crossorigin="anonymous">
+        <canvas id="broadcast-canvas"></canvas>
+        <input type="file" id="file-photo" accept="image/*">
+        <input type="file" id="file-frame" accept="image/png, image/jpeg">
+    </div>
+
+    <!-- Login -->
+    <div id="login-screen">
+        <div class="login-card">
+            <h2 style="color:white;">Zoom Clone V5</h2>
+            <p style="color:#aaa; font-size:13px;">Vertical Mobile Edition</p>
+            <input type="text" id="username" placeholder="Your Name">
+            <button class="btn-primary" onclick="initApp()">Join Meeting</button>
+        </div>
+    </div>
+
+    <!-- Invite Button -->
+    <div id="invite-badge" onclick="copyInviteLink()">
+        <i class="fas fa-link"></i>
+        <span>Invite Others</span>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast">Link Copied to Clipboard!</div>
+
+    <!-- Paging Indicators -->
+    <div class="dots-indicator" id="dots-nav">
+        <div class="dot active"></div>
+        <div class="dot"></div>
+    </div>
+
+    <!-- Main Swiper Container -->
+    <div id="app-container" onscroll="handleScroll()">
+        
+        <!-- PAGE 1: SPEAKER VIEW -->
+        <div class="page" id="page-speaker">
+            <div id="speaker-video-container">
+                <video id="speaker-video" autoplay playsinline></video>
+                <div class="speaker-label" id="speaker-name">Waiting...</div>
+            </div>
+        </div>
+
+        <!-- PAGE 2: GALLERY VIEW -->
+        <div class="page" id="page-gallery">
+            <!-- Gallery items injected here -->
+        </div>
+
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <button class="tool-btn" onclick="toggleAudio()" id="btn-audio">
+            <i class="fas fa-microphone"></i> <span>Mute</span>
+        </button>
+        <button class="tool-btn" onclick="toggleVideo()" id="btn-video">
+            <i class="fas fa-video"></i> <span>Video</span>
+        </button>
+        <button class="tool-btn" onclick="selectFrame()" id="btn-frame">
+            <i class="fas fa-crop-simple"></i> <span>Frame</span>
+        </button>
+        <button class="tool-btn" onclick="selectPhoto()" id="btn-photo">
+            <i class="fas fa-image"></i> <span>Photo</span>
+        </button>
+        <button class="tool-btn danger" onclick="location.reload()">
+            <i class="fas fa-phone-slash"></i> <span>End</span>
+        </button>
+    </div>
+
+    <!-- Action Sheet -->
+    <div class="overlay" id="overlay" onclick="closeMenu()"></div>
+    <div id="action-sheet">
+        <h3 style="margin: 0 0 10px 0; color:#888; font-size:14px;" id="menu-title">User Options</h3>
+        <button class="action-btn" onclick="pinUser()">
+            <i class="fas fa-thumbtack"></i> Pin User (Fullscreen)
+        </button>
+        <div id="host-controls" style="display:none; flex-direction:column; gap:10px;">
+            <button class="action-btn" style="color: #ff4444;" onclick="kickUser()">
+                <i class="fas fa-user-times"></i> Kick from Meeting
+            </button>
+        </div>
+        <button class="action-btn" onclick="closeMenu()">Cancel</button>
+    </div>
+
+    <script>
+        // --- STATE ---
+        let peer, myId, myName;
+        let isHost = false;
+        let connections = {}; 
+        let streams = {}; 
+        let meta = {}; 
+
+        // Media
+        let rawStream, canvasStream;
+        let isAudioOn = true, isVideoOn = true;
+        let isPhotoActive = false, isFrameActive = false;
+
+        // UI State
+        let pinnedId = null;
+        let selectedUserId = null; 
+
+        // --- DOM ---
+        const rawVideo = document.getElementById('local-raw-video');
+        const canvas = document.getElementById('broadcast-canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        const speakerVideo = document.getElementById('speaker-video');
+        
+        // --- INITIALIZATION ---
+        async function initApp() {
+            const nameIn = document.getElementById('username');
+            if(!nameIn.value) return alert("Enter Name");
+            myName = nameIn.value;
+
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex'; 
+            document.getElementById('invite-badge').style.display = 'flex';
+
+            try {
+                // 1. Camera Setup - PREFER PORTRAIT RESOLUTION
+                rawStream = await navigator.mediaDevices.getUserMedia({
+                    // Swapped dimensions to suggest portrait
+                    video: { width: {ideal: 360}, height: {ideal: 640}, facingMode: "user" },
+                    audio: { echoCancellation: true, noiseSuppression: true }
+                });
+                rawVideo.srcObject = rawStream;
+                await rawVideo.play();
+
+                // 2. Start Compositor (FIX: Vertical 9:16 Canvas)
+                startCompositor();
+
+                // 3. Create Broadcast Stream
+                canvasStream = canvas.captureStream(30); // 30 FPS
+                if(rawStream.getAudioTracks().length) canvasStream.addTrack(rawStream.getAudioTracks()[0]);
+                
+                // 4. Store Local Stream
+                streams['me'] = canvasStream;
+                meta['me'] = { name: myName + " (You)" };
+
+                // 5. Init UI
+                renderGallery();
+                updateSpeakerView('me');
+
+                // 6. Connect PeerJS
+                initPeer();
+
+            } catch(e) {
+                alert("Error: " + e.message);
+            }
+        }
+
+        // --- PEERJS & HOST LOGIC ---
+        function initPeer() {
+            peer = new Peer(undefined, { debug: 1 });
+            
+            peer.on('open', id => {
+                myId = id;
+                const urlParams = new URLSearchParams(window.location.search);
+                const room = urlParams.get('room');
+                
+                if(room) {
+                    isHost = false;
+                    connectToHost(room);
+                } else {
+                    isHost = true;
+                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?room=" + id;
+                    window.history.replaceState({path: newUrl}, "", newUrl);
+                    showToast("Room Created! Click 'Invite Others'");
+                }
+            });
+
+            peer.on('connection', conn => setupConnection(conn));
+            peer.on('call', call => handleCall(call));
+            peer.on('error', err => console.log(err));
+        }
+
+        function connectToHost(hostId) {
+            const conn = peer.connect(hostId, { metadata: { name: myName } });
+            setupConnection(conn);
+        }
+
+        function setupConnection(conn) {
+            connections[conn.peer] = conn;
+            conn.on('open', () => {
+                conn.send({ type: 'name', name: myName });
+                if(!streams[conn.peer]) {
+                    const call = peer.call(conn.peer, canvasStream, { metadata: { name: myName } });
+                    handleCall(call);
+                }
+            });
+            conn.on('data', data => {
+                if(data.type === 'name') {
+                    if(!meta[conn.peer]) meta[conn.peer] = {};
+                    meta[conn.peer].name = data.name;
+                    updateNameTag(conn.peer);
+                }
+                if(data.type === 'kick') {
+                    peer.destroy();
+                    alert("You have been kicked by the host.");
+                    window.location.href = window.location.pathname;
+                }
+            });
+            conn.on('close', () => removeUser(conn.peer));
+        }
+
+        function handleCall(call) {
+            call.answer(canvasStream);
+            call.on('stream', remoteStream => {
+                streams[call.peer] = remoteStream;
+                if(!meta[call.peer]) meta[call.peer] = { name: "Guest" };
+                renderGallery();
+                if(pinnedId === 'me' || !pinnedId) updateSpeakerView(call.peer);
+            });
+        }
+
+        function removeUser(id) {
+            delete streams[id];
+            delete connections[id];
+            renderGallery();
+            if(pinnedId === id) updateSpeakerView('me');
+        }
+
+        // --- UI RENDER LOGIC ---
+        function renderGallery() {
+            const gal = document.getElementById('page-gallery');
+            gal.innerHTML = ''; 
+
+            Object.keys(streams).forEach(id => {
+                const card = document.createElement('div');
+                card.className = 'video-card';
+                card.onclick = () => openMenu(id); 
+                
+                const vid = document.createElement('video');
+                vid.srcObject = streams[id];
+                vid.autoplay = true; vid.playsInline = true; vid.muted = true;
+
+                const tag = document.createElement('div');
+                tag.className = 'card-name';
+                tag.innerText = meta[id]?.name || "User";
+
+                const menuBtn = document.createElement('button');
+                menuBtn.className = 'card-menu-btn';
+                menuBtn.innerHTML = '<i class="fas fa-ellipsis-v"></i>';
+
+                card.append(vid, tag, menuBtn);
+                gal.appendChild(card);
+            });
+        }
+
+        function updateSpeakerView(id) {
+            pinnedId = id;
+            if(streams[id]) {
+                speakerVideo.srcObject = streams[id];
+                speakerVideo.play().catch(e => console.log(e)); 
+                document.getElementById('speaker-name').innerText = meta[id]?.name || "User";
+                speakerVideo.muted = (id === 'me' || id === myId);
+            }
+        }
+
+        function updateNameTag(id) {
+            renderGallery();
+            if(pinnedId === id) document.getElementById('speaker-name').innerText = meta[id].name;
+        }
+
+        // --- MENU & FEATURES ---
+        function copyInviteLink() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                showToast("Link Copied to Clipboard!");
+            }).catch(() => prompt("Copy this link:", url));
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+
+        function openMenu(id) {
+            selectedUserId = id;
+            document.getElementById('menu-title').innerText = "Options for " + (meta[id]?.name || "User");
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('action-sheet').classList.add('show');
+            const kickBtn = document.getElementById('host-controls');
+            kickBtn.style.display = (isHost && id !== 'me' && id !== myId) ? 'flex' : 'none';
+        }
+
+        function closeMenu() {
+            document.getElementById('action-sheet').classList.remove('show');
+            document.getElementById('overlay').style.display = 'none';
+            selectedUserId = null;
+        }
+
+        function pinUser() {
+            if(selectedUserId) {
+                updateSpeakerView(selectedUserId);
+                closeMenu();
+                const container = document.getElementById('speaker-video-container');
+                container.classList.add('pinned-frame-border');
+                document.getElementById('app-container').scrollTo({ left: 0, behavior: 'smooth' });
+            }
+        }
+
+        function kickUser() {
+            if(selectedUserId && connections[selectedUserId]) {
+                if(confirm("Kick this user?")) {
+                    connections[selectedUserId].send({ type: 'kick' });
+                    setTimeout(() => {
+                        connections[selectedUserId].close();
+                        removeUser(selectedUserId);
+                    }, 500);
+                    closeMenu();
+                }
+            }
+        }
+
+        // --- COMPOSITOR (FIX: 9:16 Vertical & Natural Aspect Ratio) ---
+        function startCompositor() {
+            // Set canvas to Vertical 9:16
+            const W = 360; 
+            const H = 640;
+            canvas.width = W; 
+            canvas.height = H;
+            
+            const photoImg = document.getElementById('shared-photo-img');
+            const frameImg = document.getElementById('frame-overlay-img');
+
+            function draw() {
+                // Clear
+                ctx.fillStyle = "#000"; ctx.fillRect(0,0,W,H);
+
+                if(isPhotoActive) {
+                    drawImageFit(ctx, photoImg, W, H);
+                } 
+                else if(isVideoOn && rawVideo.readyState >= 2) {
+                    // NEW: Helper to draw video 'covered' (no stretch)
+                    drawVideoCover(ctx, rawVideo, W, H);
+                } 
+                else {
+                    // Avatar placeholder
+                    ctx.fillStyle = "#222"; ctx.fillRect(0,0,W,H);
+                    ctx.fillStyle = "#fff"; ctx.font="40px Arial"; 
+                    ctx.textAlign = "center";
+                    ctx.fillText(myName[0].toUpperCase(), W/2, H/2);
+                }
+
+                if(isFrameActive) ctx.drawImage(frameImg, 0, 0, W, H);
+                requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        // FIX: Helper to crop center without stretching (Widing fix)
+        function drawVideoCover(ctx, video, targetW, targetH) {
+            const vidW = video.videoWidth;
+            const vidH = video.videoHeight;
+            if(vidW === 0 || vidH === 0) return;
+
+            // Calculate "Cover" dimensions
+            // We want to fill the targetW/targetH with vidW/vidH
+            // Src Aspect vs Dst Aspect
+            const srcAspect = vidW / vidH;
+            const dstAspect = targetW / targetH;
+            
+            let sx, sy, sWidth, sHeight;
+
+            if (srcAspect > dstAspect) {
+                // Source is wider than destination (e.g. Landscape cam -> Vertical canvas)
+                // We crop the sides (pillarbox crop)
+                sHeight = vidH;
+                sWidth = vidH * dstAspect;
+                sy = 0;
+                sx = (vidW - sWidth) / 2;
+            } else {
+                // Source is taller than destination (unlikely for webcam, but possible)
+                // We crop top/bottom
+                sWidth = vidW;
+                sHeight = vidW / dstAspect;
+                sx = 0;
+                sy = (vidH - sHeight) / 2;
+            }
+
+            // Draw logic with Mirroring
+            ctx.save();
+            ctx.translate(targetW, 0);
+            ctx.scale(-1, 1);
+            
+            // Draw the cropped portion of video to the full canvas
+            ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            
+            ctx.restore();
+        }
+
+        function drawImageFit(ctx, img, w, h) {
+            const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+            const x = (w / 2) - (img.naturalWidth / 2) * scale;
+            const y = (h / 2) - (img.naturalHeight / 2) * scale;
+            ctx.drawImage(img, x, y, img.naturalWidth * scale, img.naturalHeight * scale);
+        }
+
+        // --- BUTTONS ---
+        function selectFrame() { document.getElementById('file-frame').click(); }
+        document.getElementById('file-frame').onchange = (e) => {
+            const f = e.target.files[0];
+            if(f) {
+                const r = new FileReader();
+                r.onload = (ev) => {
+                    document.getElementById('frame-overlay-img').src = ev.target.result;
+                    isFrameActive = true;
+                    document.getElementById('btn-frame').classList.add('active');
+                };
+                r.readAsDataURL(f);
+            }
+        };
+
+        function selectPhoto() {
+            if(isPhotoActive) {
+                isPhotoActive = false;
+                document.getElementById('btn-photo').classList.remove('active');
+            } else {
+                document.getElementById('file-photo').click();
+            }
+        }
+        document.getElementById('file-photo').onchange = (e) => {
+            const f = e.target.files[0];
+            if(f) {
+                const r = new FileReader();
+                r.onload = (ev) => {
+                    document.getElementById('shared-photo-img').src = ev.target.result;
+                    isPhotoActive = true;
+                    document.getElementById('btn-photo').classList.add('active');
+                };
+                r.readAsDataURL(f);
+            }
+        };
+
+        function toggleAudio() {
+            isAudioOn = !isAudioOn;
+            rawStream.getAudioTracks()[0].enabled = isAudioOn;
+            document.getElementById('btn-audio').classList.toggle('danger', !isAudioOn);
+        }
+        function toggleVideo() {
+            isVideoOn = !isVideoOn;
+            document.getElementById('btn-video').classList.toggle('danger', !isVideoOn);
+        }
+
+        function handleScroll() {
+            const container = document.getElementById('app-container');
+            const dots = document.querySelectorAll('.dot');
+            if (container.scrollLeft < container.offsetWidth / 2) {
+                dots[0].classList.add('active');
+                dots[1].classList.remove('active');
+            } else {
+                dots[0].classList.remove('active');
+                dots[1].classList.add('active');
+            }
+        }
+    </script>
+</body>
+</html>
