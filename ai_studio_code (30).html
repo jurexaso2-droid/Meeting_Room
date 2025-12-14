@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Zoom Clone - Host Presentation</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --primary: #2D8CFF;
+            --danger: #E02828;
+            --text: #ffffff;
+            --control-height: 70px;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: black;
+            color: var(--text);
+            margin: 0;
+            height: 100dvh; 
+            width: 100vw;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* --- LOGIN --- */
+        #login-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a1a1a;
+            display: flex; justify-content: center; align-items: center; z-index: 2000;
+        }
+        .login-card {
+            background: #242424; padding: 30px; border-radius: 12px;
+            text-align: center; width: 85%; max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        input {
+            width: 100%; padding: 15px; margin: 15px 0; background: #333;
+            border: 1px solid #555; color: white; border-radius: 8px; outline: none; font-size: 16px;
+        }
+        .btn {
+            padding: 15px 20px; border: none; border-radius: 8px; cursor: pointer;
+            font-weight: 600; background: var(--primary); color: white; transition: 0.2s; 
+            font-size: 16px; width: 100%;
+        }
+
+        /* --- MAIN LAYOUT --- */
+        #app-container {
+            display: none; width: 100%; height: 100%; position: relative;
+            flex-direction: column;
+        }
+
+        .main-stage {
+            flex: 1; display: flex; flex-direction: column; position: relative;
+            background: #000; width: 100%; height: 100%; overflow: hidden;
+        }
+
+        .header {
+            position: absolute; top: 10px; left: 10px; z-index: 10;
+            background: rgba(40, 40, 40, 0.8); padding: 8px 15px; border-radius: 20px;
+            display: flex; align-items: center; gap: 10px; font-size: 14px;
+            backdrop-filter: blur(5px);
+            max-width: 90%;
+        }
+
+        /* --- SPLIT VIEW SYSTEM --- */
+        #video-stage-layout {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 1. GRID VIEW (Others) */
+        #grid-view {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-content: center;
+            gap: 10px;
+            padding: 10px;
+            overflow-y: auto;
+            width: 100%;
+            transition: all 0.3s ease;
+        }
+
+        /* 2. SPOTLIGHT VIEW (Pinned) */
+        #spotlight-view {
+            display: none; /* Hidden by default */
+            flex: 3; /* Takes more space when active */
+            background: #000;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            position: relative;
+        }
+
+        /* --- VIDEO CARD --- */
+        .video-card {
+            position: relative;
+            background: #222; border-radius: 12px; overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 16/9;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        video { width: 100%; height: 100%; object-fit: cover; background: #000; transform: scaleX(-1); }
+        video.no-mirror { transform: scaleX(1); }
+
+        .vid-overlay {
+            position: absolute; bottom: 10px; left: 10px;
+            padding: 4px 10px; background: rgba(0,0,0,0.6); 
+            border-radius: 4px; font-size: 14px; pointer-events: none;
+            z-index: 5;
+        }
+
+        .host-controls {
+            position: absolute; top: 10px; right: 10px; z-index: 20;
+            display: none; 
+        }
+        .spotlight-btn {
+            background: rgba(0,0,0,0.6); color: white; border: none;
+            width: 35px; height: 35px; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: 0.2s;
+        }
+        .spotlight-btn.active { background: #FFD700; color: black; }
+
+
+        /* --- PINNED MODE LAYOUT (Active Class) --- */
+        /* When class 'pinned-active' is added to #video-stage-layout */
+        
+        .pinned-active #spotlight-view {
+            display: flex; /* Show stage */
+        }
+        
+        /* The Spotlight Video Card should fill the space */
+        #spotlight-view .video-card {
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            object-fit: contain;
+        }
+
+        /* The Grid View becomes a Sidebar Strip */
+        .pinned-active #grid-view {
+            flex: 1; 
+            flex-wrap: nowrap; /* No wrapping, just scrolling */
+            flex-direction: column; /* Vertical stack */
+            justify-content: flex-start;
+            align-content: center;
+            background: #111;
+            border-left: 1px solid #333;
+            padding: 10px;
+            max-width: 250px; /* Limit width of sidebar */
+        }
+
+        .pinned-active #grid-view .video-card {
+            width: 100% !important; 
+            max-width: 100%;
+            aspect-ratio: 16/9;
+            height: auto;
+            margin-bottom: 10px;
+        }
+
+        /* --- PORTRAIT / MOBILE ADJUSTMENTS --- */
+        @media (orientation: portrait) {
+            .pinned-active #video-stage-layout {
+                flex-direction: column; /* Stack vertically */
+            }
+            
+            .pinned-active #spotlight-view {
+                flex: 1; /* Main takes top */
+                border-bottom: 1px solid #333;
+            }
+
+            .pinned-active #grid-view {
+                flex-direction: row; /* Horizontal strip at bottom */
+                max-width: none;
+                width: 100%;
+                height: 160px; /* Fixed height for strip */
+                flex: none;
+                border-left: none;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .pinned-active #grid-view .video-card {
+                width: 180px !important;
+                height: 100%;
+                margin-bottom: 0;
+            }
+        }
+
+        /* --- CONTROLS BAR --- */
+        .controls-bar {
+            height: var(--control-height); 
+            background: #1e1e1e; 
+            display: flex; justify-content: space-evenly; align-items: center;
+            border-top: 1px solid #333; z-index: 50; 
+            padding-bottom: env(safe-area-inset-bottom);
+            flex-shrink: 0; width: 100%;
+        }
+        .control-btn {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: transparent; border: none; color: #ccc;
+            cursor: pointer; min-width: 50px; position: relative;
+        }
+        .control-btn i { 
+            font-size: 20px; margin-bottom: 4px; padding: 10px; border-radius: 14px; 
+            background: #2a2a2a; transition: 0.2s;
+        }
+        .control-btn span { font-size: 10px; font-weight: 500;}
+        .control-btn.active i { background: var(--primary); color: white; }
+        .control-btn.off i { background: var(--danger); color: white; }
+        
+        /* Host Buttons */
+        .host-only { display: none; } 
+        #btn-present.presenting i { background: #28a745; color: white; }
+        #btn-frame.active i { background: #9b59b6; color: white; }
+        .badge {
+            position: absolute; top: 0px; right: 8px; width: 10px; height: 10px; background: red;
+            border-radius: 50%; border: 2px solid #1e1e1e; display: none;
+        }
+
+        /* Landscape Controls */
+        @media (orientation: landscape) {
+            #app-container { flex-direction: row; }
+            .controls-bar {
+                flex-direction: column; width: 70px; height: 100%;
+                border-top: none; border-left: 1px solid #333;
+                padding-bottom: 0; order: 2; justify-content: center; gap: 15px;
+            }
+            .main-stage { order: 1; }
+        }
+
+        /* --- SIDEBARS --- */
+        .sidebar {
+            position: fixed; top: 0; right: 0; bottom: 0;
+            width: 100%; background: #ffffff; color: #121212; 
+            display: flex; flex-direction: column;
+            transform: translateX(100%); transition: transform 0.3s ease;
+            z-index: 1500;
+        }
+        @media (min-width: 768px) { .sidebar { width: 350px; } }
+        .sidebar.open { transform: translateX(0); }
+
+        .sidebar-header {
+            padding: 15px; border-bottom: 1px solid #ddd; 
+            font-weight: bold; font-size: 18px;
+            display: flex; justify-content: space-between; align-items: center; 
+            background: #f8f9fa; height: 60px;
+        }
+
+        .chat-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; background: #f4f4f4; }
+        .msg { padding: 10px 14px; border-radius: 12px; font-size: 15px; max-width: 85%; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .msg-remote { background: #ffffff; color: #000; align-self: flex-start; }
+        .msg-local { background: var(--primary); color: white; align-self: flex-end; }
+        
+        .chat-input-area {
+            padding: 10px 15px; border-top: 1px solid #ddd; display: flex; gap: 10px; background: #fff;
+            padding-bottom: max(10px, env(safe-area-inset-bottom));
+        }
+        #chat-input { margin: 0; background: #f0f0f0; color: #000; border: none; flex: 1; padding: 12px; border-radius: 20px; }
+        .send-btn { background: var(--primary); color: white; border: none; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; }
+
+        /* Participants List */
+        .participant-item { padding: 15px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; }
+        .participant-info { display: flex; align-items: center; gap: 15px; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: white; }
+        
+        /* 3 DOTS MENU */
+        .more-options { position: relative; }
+        .more-btn { background: none; border: none; color: #666; font-size: 18px; cursor: pointer; padding: 5px; }
+        .popover-menu {
+            position: absolute; right: 0; top: 100%; width: 140px;
+            background: white; box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            border-radius: 8px; display: none; flex-direction: column;
+            overflow: hidden; z-index: 100;
+        }
+        .popover-menu.show { display: flex; }
+        .popover-item {
+            padding: 12px; text-align: left; background: none; border: none;
+            font-size: 14px; cursor: pointer; border-bottom: 1px solid #eee;
+        }
+        .popover-item:hover { background: #f0f0f0; }
+
+        /* TOAST */
+        #toast-container {
+            position: absolute; bottom: 90px; left: 15px; right: 15px;
+            display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+            align-items: flex-start; z-index: 900;
+        }
+        .toast {
+            background: rgba(30, 30, 30, 0.9); backdrop-filter: blur(4px);
+            color: white; padding: 12px 18px; border-radius: 12px; font-size: 14px; 
+            animation: slideIn 0.3s ease; max-width: 90%;
+            border-left: 4px solid var(--primary);
+        }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; } }
+
+    </style>
+</head>
+<body>
+
+    <!-- Hidden elements for Processing -->
+    <video id="raw-video-capture" autoplay playsinline muted style="display:none;"></video>
+    <canvas id="broadcast-canvas" width="1280" height="720" style="display:none;"></canvas>
+    
+    <!-- File Inputs -->
+    <input type="file" id="host-file-input" accept="image/*" style="display:none;" onchange="handleHostFileSelect()">
+    <input type="file" id="frame-file-input" accept="image/png, image/*" style="display:none;" onchange="handleFrameSelect()">
+
+    <!-- LOGIN -->
+    <div id="login-screen">
+        <div class="login-card">
+            <h2 style="color:white; margin-bottom:5px;">Join Meeting</h2>
+            <p style="color:#aaa; font-size:14px; margin-bottom:20px;">Zoom Clone with Frames</p>
+            <input type="text" id="username" placeholder="Enter Your Name" autocomplete="off">
+            <button class="btn" onclick="init()">Start / Join</button>
+        </div>
+    </div>
+
+    <!-- APP -->
+    <div id="app-container">
+        
+        <div class="main-stage">
+            <div class="header">
+                <i class="fas fa-video" style="color:var(--primary)"></i>
+                <span id="room-status">Connecting...</span>
+                <span id="host-badge" style="display:none; background:#FFD700; color:black; font-size:10px; padding:2px 6px; border-radius:4px; margin-left:5px; font-weight:bold;">HOST</span>
+                <div style="flex:1"></div>
+                <div style="background:#333; padding:5px 10px; border-radius:15px; cursor:pointer;" onclick="copyLink()">
+                    <i class="fas fa-share-alt"></i> Invite
+                </div>
+            </div>
+
+            <div id="toast-container"></div>
+
+            <!-- NEW SPLIT CONTAINER -->
+            <div id="video-stage-layout">
+                <!-- 1. Spotlight Area (Pinned User) -->
+                <div id="spotlight-view"></div>
+                
+                <!-- 2. Grid Area (Everyone Else) -->
+                <div id="grid-view">
+                    <!-- Videos injected here initially -->
+                </div>
+            </div>
+        </div>
+
+        <div class="controls-bar">
+            <button class="control-btn" id="btn-mic" onclick="toggleMic()">
+                <i class="fas fa-microphone"></i> <span>Mute</span>
+            </button>
+            <button class="control-btn" id="btn-cam" onclick="toggleCam()">
+                <i class="fas fa-video"></i> <span>Cam</span>
+            </button>
+            
+            <!-- Host Only Buttons -->
+            <button class="control-btn host-only" id="btn-frame" onclick="triggerFrameSelect()">
+                <i class="fas fa-crop-alt"></i> <span>Frame</span>
+            </button>
+            <button class="control-btn host-only" id="btn-present" onclick="togglePresentation()">
+                <i class="fas fa-image"></i> <span>Present</span>
+            </button>
+
+            <button class="control-btn" id="btn-participants" onclick="toggleSidebar('participants')">
+                <i class="fas fa-users"></i> <span>People</span>
+            </button>
+            <button class="control-btn" id="btn-chat" onclick="toggleSidebar('chat')">
+                <span class="badge" id="chat-badge"></span>
+                <i class="fas fa-comment-alt"></i> <span>Chat</span>
+            </button>
+            <button class="control-btn" onclick="leaveMeeting()">
+                <i class="fas fa-phone" style="background:var(--danger); color:white; transform: rotate(135deg);"></i> <span>End</span>
+            </button>
+        </div>
+
+        <!-- SIDEBAR: PARTICIPANTS -->
+        <div class="sidebar" id="sidebar-participants">
+            <div class="sidebar-header">
+                <span>Participants</span>
+                <button class="close-sidebar-btn" onclick="closeSidebars()" style="border:none;background:none;font-size:24px;padding:10px;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="participants-list" style="overflow-y:auto; flex:1;"></div>
+        </div>
+
+        <!-- SIDEBAR: CHAT -->
+        <div class="sidebar" id="sidebar-chat">
+            <div class="sidebar-header">
+                <span>Chat</span>
+                <button class="close-sidebar-btn" onclick="closeSidebars()" style="border:none;background:none;font-size:24px;padding:10px;"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="chat-messages" id="chat-box"></div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Type..." autocomplete="off">
+                <button class="send-btn" onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const peerConfig = { debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } };
+
+        let peer, myId, myName;
+        let myBroadcastStream; // The stream sent to peers (Canvas)
+        let rawCamStream; // The raw getUserMedia stream
+        let activeCalls = {}; 
+        let activeConns = {}; 
+        let peerNames = {}; 
+        let currentSidebar = null;
+        let pinnedId = null;
+        
+        let isHost = false; 
+        let isPresenting = false; 
+        let frameImage = null; 
+        let presentationImage = null; 
+
+        // Canvas Compositing
+        const rawVideoEl = document.getElementById('raw-video-capture');
+        const canvasEl = document.getElementById('broadcast-canvas');
+        const ctx = canvasEl.getContext('2d');
+        let requestAnimId;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let roomId = urlParams.get('room'); 
+
+        async function init() {
+            const nameInput = document.getElementById('username');
+            if (!nameInput.value.trim()) return alert("Enter name");
+            myName = nameInput.value;
+            peerNames['me'] = myName;
+
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+
+            if (!roomId) {
+                becomeHost();
+            }
+
+            try {
+                rawCamStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, 
+                    audio: { echoCancellation: true, noiseSuppression: true } 
+                });
+                
+                rawVideoEl.srcObject = rawCamStream;
+                await rawVideoEl.play();
+
+                startCompositor();
+
+                const canvasStream = canvasEl.captureStream(30); 
+                const audioTracks = rawCamStream.getAudioTracks();
+                if (audioTracks.length > 0) canvasStream.addTrack(audioTracks[0]);
+
+                myBroadcastStream = canvasStream;
+                
+                peer = new Peer(undefined, peerConfig);
+
+                peer.on('open', id => {
+                    myId = id;
+                    addVideo(myBroadcastStream, myName, myId, true);
+                    updateParticipantsUI();
+
+                    if (isHost) {
+                        document.getElementById('room-status').innerText = "Hosting";
+                        window.history.pushState({}, '', '?room=' + myId);
+                    } else {
+                        document.getElementById('room-status').innerText = "Connected";
+                        connectToPeer(roomId);
+                    }
+                });
+
+                peer.on('connection', conn => setupConnection(conn));
+                peer.on('call', call => {
+                    call.answer(myBroadcastStream);
+                    handleCall(call);
+                });
+
+            } catch (error) {
+                console.error(error);
+                alert("Error starting video. Please allow permissions.");
+            }
+        }
+
+        function startCompositor() {
+            function draw() {
+                ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+                if (isPresenting && presentationImage) {
+                    ctx.fillStyle = "#000";
+                    ctx.fillRect(0,0, canvasEl.width, canvasEl.height);
+                    const scale = Math.min(canvasEl.width / presentationImage.width, canvasEl.height / presentationImage.height);
+                    const x = (canvasEl.width / 2) - (presentationImage.width / 2) * scale;
+                    const y = (canvasEl.height / 2) - (presentationImage.height / 2) * scale;
+                    ctx.drawImage(presentationImage, x, y, presentationImage.width * scale, presentationImage.height * scale);
+                } else {
+                    ctx.save();
+                    ctx.translate(canvasEl.width, 0);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(rawVideoEl, 0, 0, canvasEl.width, canvasEl.height);
+                    ctx.restore();
+                }
+
+                if (frameImage) {
+                    ctx.drawImage(frameImage, 0, 0, canvasEl.width, canvasEl.height);
+                }
+                requestAnimId = requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        // --- HOST LOGIC ---
+        function becomeHost() {
+            isHost = true;
+            document.getElementById('host-badge').style.display = 'inline-block';
+            document.querySelectorAll('.host-only').forEach(el => el.style.display = 'flex');
+        }
+
+        function triggerFrameSelect() {
+            if(!isHost) return;
+            document.getElementById('frame-file-input').click();
+        }
+
+        function handleFrameSelect() {
+            const file = document.getElementById('frame-file-input').files[0];
+            if (file) {
+                const img = new Image();
+                img.onload = () => {
+                    frameImage = img;
+                    document.getElementById('btn-frame').classList.add('active');
+                    const vid = document.querySelector(`#vid-${myId} video`);
+                    if(vid) vid.classList.add('no-mirror');
+                    showToast("Frame applied.");
+                };
+                img.src = URL.createObjectURL(file);
+            }
+            document.getElementById('frame-file-input').value = '';
+        }
+
+        function promoteToHost(targetId) {
+            if (!isHost) return;
+            if (confirm(`Make ${peerNames[targetId]} the Host?`)) {
+                const conn = activeConns[targetId];
+                if (conn) {
+                    conn.send({ type: 'promote-host' });
+                    isHost = false;
+                    document.getElementById('host-badge').style.display = 'none';
+                    document.querySelectorAll('.host-only').forEach(el => el.style.display = 'none');
+                    updateParticipantsUI();
+                    showToast(`You passed host to ${peerNames[targetId]}`);
+                }
+            }
+        }
+
+        // --- PEER JS CORE ---
+        function connectToPeer(targetId) {
+            if (activeConns[targetId]) return;
+            const conn = peer.connect(targetId, { metadata: { name: myName } });
+            setupConnection(conn);
+            const call = peer.call(targetId, myBroadcastStream, { metadata: { name: myName } });
+            handleCall(call);
+        }
+
+        function handleCall(call) {
+            const targetId = call.peer;
+            activeCalls[targetId] = call;
+            call.on('stream', userStream => {
+                const name = call.metadata?.name || peerNames[targetId] || "Guest";
+                addVideo(userStream, name, targetId, false);
+            });
+            call.on('close', () => closeConnection(targetId));
+        }
+
+        function setupConnection(conn) {
+            activeConns[conn.peer] = conn;
+            conn.on('open', () => {
+                peerNames[conn.peer] = conn.metadata?.name || "Guest";
+                updateParticipantsUI();
+                if (isHost) {
+                    const list = Object.keys(activeConns).filter(id => id !== conn.peer);
+                    if (list.length > 0) conn.send({ type: 'peer-list', peers: list });
+                }
+            });
+            conn.on('data', data => {
+                if (data.type === 'chat') {
+                    addChatMessage(data.sender, data.msg, false);
+                    showChatPopup(data.sender, data.msg);
+                    if (currentSidebar !== 'chat') document.getElementById('chat-badge').style.display = 'block';
+                } else if (data.type === 'peer-list') {
+                    data.peers.forEach(id => { if (id !== myId) connectToPeer(id); });
+                } else if (data.type === 'set-spotlight') {
+                    applySpotlight(data.id);
+                } else if (data.type === 'promote-host') {
+                    becomeHost();
+                    showToast("You are now the Host!");
+                    updateParticipantsUI();
+                }
+            });
+            conn.on('close', () => closeConnection(conn.peer));
+        }
+
+        function closeConnection(id) {
+            if (document.getElementById(`vid-${id}`)) document.getElementById(`vid-${id}`).remove();
+            if (activeCalls[id]) activeCalls[id].close();
+            delete activeCalls[id];
+            delete activeConns[id];
+            delete peerNames[id];
+            if (pinnedId === id) applySpotlight(null);
+            updateParticipantsUI();
+        }
+
+        // --- VIDEO DOM ---
+        function addVideo(stream, name, id, isLocal) {
+            if (document.getElementById(`vid-${id}`)) {
+                document.querySelector(`#vid-${id} video`).srcObject = stream;
+                return;
+            }
+            
+            // Always add to Grid View initially
+            const container = document.getElementById('grid-view');
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.id = `vid-${id}`;
+            card.onclick = (e) => {
+                if(e.target.closest('button')) return;
+                toggleLocalPin(id);
+            };
+
+            const vid = document.createElement('video');
+            vid.srcObject = stream;
+            vid.autoplay = true; vid.playsInline = true;
+            vid.muted = isLocal;
+            if (isLocal) vid.classList.add('no-mirror');
+
+            const overlay = document.createElement('div');
+            overlay.className = 'vid-overlay';
+            overlay.innerHTML = isLocal ? `You` : name;
+
+            const hostControls = document.createElement('div');
+            hostControls.className = 'host-controls host-only';
+            if (isHost) hostControls.style.display = 'block'; 
+            
+            const spotBtn = document.createElement('button');
+            spotBtn.className = 'spotlight-btn';
+            spotBtn.id = `spot-btn-${id}`;
+            spotBtn.innerHTML = '<i class="fas fa-star"></i>';
+            spotBtn.onclick = () => toggleHostSpotlight(id);
+            
+            hostControls.appendChild(spotBtn);
+            card.appendChild(hostControls);
+            card.appendChild(vid);
+            card.appendChild(overlay);
+            container.appendChild(card);
+        }
+
+        // --- PIN / SPOTLIGHT & LAYOUT LOGIC ---
+        function toggleHostSpotlight(id) {
+            if (!isHost) return;
+            const targetId = (pinnedId === id) ? null : id;
+            applySpotlight(targetId);
+            Object.values(activeConns).forEach(c => { if(c.open) c.send({ type: 'set-spotlight', id: targetId }); });
+        }
+
+        function toggleLocalPin(id) {
+            const targetId = (pinnedId === id) ? null : id;
+            applySpotlight(targetId);
+        }
+
+        function applySpotlight(id) {
+            const gridContainer = document.getElementById('grid-view');
+            const spotContainer = document.getElementById('spotlight-view');
+            const layout = document.getElementById('video-stage-layout');
+
+            // Reset buttons
+            document.querySelectorAll('.spotlight-btn').forEach(b => b.classList.remove('active'));
+
+            if (id === null) {
+                // UNPIN: Return card to Grid
+                if (pinnedId && document.getElementById(`vid-${pinnedId}`)) {
+                    gridContainer.appendChild(document.getElementById(`vid-${pinnedId}`));
+                }
+                pinnedId = null;
+                layout.classList.remove('pinned-active');
+            } else {
+                // PIN
+                // 1. Move old pin back to grid if exists
+                if (pinnedId && pinnedId !== id && document.getElementById(`vid-${pinnedId}`)) {
+                    gridContainer.appendChild(document.getElementById(`vid-${pinnedId}`));
+                }
+
+                pinnedId = id;
+                const targetCard = document.getElementById(`vid-${id}`);
+                const targetBtn = document.getElementById(`spot-btn-${id}`);
+
+                if (targetCard) {
+                    spotContainer.appendChild(targetCard);
+                    layout.classList.add('pinned-active');
+                }
+                if (targetBtn) targetBtn.classList.add('active');
+            }
+        }
+
+        // --- PRESENTATION ---
+        function togglePresentation() {
+            if (!isHost) return;
+            if (isPresenting) {
+                isPresenting = false;
+                presentationImage = null;
+                document.getElementById('btn-present').classList.remove('presenting');
+            } else {
+                document.getElementById('host-file-input').click();
+            }
+        }
+
+        function handleHostFileSelect() {
+            const file = document.getElementById('host-file-input').files[0];
+            if (!file) return;
+
+            const img = new Image();
+            img.onload = function() {
+                presentationImage = img;
+                isPresenting = true;
+                document.getElementById('btn-present').classList.add('presenting');
+                toggleHostSpotlight(myId);
+            };
+            img.src = URL.createObjectURL(file);
+            document.getElementById('host-file-input').value = '';
+        }
+
+        // --- CHAT ---
+        function sendChat() {
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            addChatMessage("Me", msg, true);
+            Object.values(activeConns).forEach(c => { if(c.open) c.send({ type:'chat', msg:msg, sender:myName }); });
+            input.value = '';
+        }
+        function addChatMessage(sender, msg, isSelf) {
+            const box = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = `msg ${isSelf?'msg-local':'msg-remote'}`;
+            div.innerHTML = `<b>${sender}</b><br>${msg}`;
+            box.appendChild(div); box.scrollTop = box.scrollHeight;
+        }
+        function showChatPopup(sender, msg) {
+            if (currentSidebar === 'chat') return;
+            showToast(`<strong>${sender}</strong>: ${msg}`);
+        }
+
+        // --- UI UTILS ---
+        function showToast(html) {
+            const c = document.getElementById('toast-container');
+            const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = html;
+            c.appendChild(t); setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+        }
+        function toggleMic() {
+            const track = rawCamStream.getAudioTracks()[0]; if (!track) return;
+            track.enabled = !track.enabled;
+            const btn = document.getElementById('btn-mic');
+            btn.querySelector('i').className = track.enabled ? 'fas fa-microphone' : 'fas fa-microphone-slash';
+            btn.classList.toggle('off', !track.enabled);
+        }
+        function toggleCam() {
+            const track = rawCamStream.getVideoTracks()[0]; if (!track) return;
+            track.enabled = !track.enabled;
+            const btn = document.getElementById('btn-cam');
+            btn.querySelector('i').className = track.enabled ? 'fas fa-video' : 'fas fa-video-slash';
+            btn.classList.toggle('off', !track.enabled);
+        }
+        function toggleSidebar(type) {
+            const pSide = document.getElementById('sidebar-participants');
+            const cSide = document.getElementById('sidebar-chat');
+            pSide.classList.remove('open'); cSide.classList.remove('open');
+            document.getElementById('btn-participants').classList.remove('active');
+            document.getElementById('btn-chat').classList.remove('active');
+            if (currentSidebar === type) { currentSidebar = null; } 
+            else {
+                currentSidebar = type;
+                if (type === 'participants') { pSide.classList.add('open'); document.getElementById('btn-participants').classList.add('active'); } 
+                else { cSide.classList.add('open'); document.getElementById('btn-chat').classList.add('active'); document.getElementById('chat-badge').style.display = 'none'; }
+            }
+        }
+        function closeSidebars() { toggleSidebar(currentSidebar); }
+        
+        function updateParticipantsUI() {
+            const list = document.getElementById('participants-list');
+            list.innerHTML = '';
+            addParticipantItem(myId, myName + " (You)", true);
+            Object.keys(peerNames).forEach(id => { if (id !== 'me') addParticipantItem(id, peerNames[id], false); });
+        }
+        function addParticipantItem(id, name, isMe) {
+            const list = document.getElementById('participants-list');
+            const div = document.createElement('div');
+            div.className = 'participant-item';
+            let hostControlsHtml = '';
+            if (isHost && !isMe) {
+                hostControlsHtml = `
+                <div class="more-options">
+                    <button class="more-btn" onclick="togglePopover('${id}')"><i class="fas fa-ellipsis-v"></i></button>
+                    <div id="pop-${id}" class="popover-menu">
+                        <button class="popover-item" onclick="promoteToHost('${id}')">Make Host</button>
+                    </div>
+                </div>`;
+            }
+            div.innerHTML = `
+                <div class="participant-info">
+                    <div class="avatar" style="background:${isMe?'#2D8CFF':'#666'}"><i class="fas fa-user"></i></div>
+                    <span>${name} ${isHost && isMe ? '<small style="color:gold;font-weight:bold;">[HOST]</small>' : ''}</span>
+                </div>
+                ${hostControlsHtml}
+            `;
+            list.appendChild(div);
+        }
+        function togglePopover(id) {
+            document.querySelectorAll('.popover-menu').forEach(el => { if(el.id !== `pop-${id}`) el.classList.remove('show'); });
+            const menu = document.getElementById(`pop-${id}`); if(menu) menu.classList.toggle('show');
+        }
+        window.addEventListener('click', (e) => {
+            if (!e.target.closest('.more-options')) { document.querySelectorAll('.popover-menu').forEach(el => el.classList.remove('show')); }
+        });
+        function copyLink() {
+            const url = window.location.href.split('?')[0] + '?room=' + (roomId || myId);
+            navigator.clipboard.writeText(url).then(() => showToast("Link Copied!"));
+        }
+        function leaveMeeting() { if(confirm("End meeting?")) window.location.href = window.location.pathname; }
+        document.getElementById('chat-input').addEventListener('keypress', e => { if(e.key==='Enter') sendChat(); });
+    </script>
+</body>
+</html>
