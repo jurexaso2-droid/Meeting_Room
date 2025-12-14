@@ -1,0 +1,787 @@
+<!-- --- START OF FILE zoom_clone_v2.html --- -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zoom Clone V2</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #1a1a1a;
+            --bg-black: #000000;
+            --zoom-grey: #242424;
+            --text: #ffffff;
+            --accent-blue: #0E72ED;
+            --accent-green: #2D8C5F; /* Zoom Share Green */
+            --danger: #E02828;
+            --toolbar-height: 72px;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-black);
+            color: var(--text);
+            margin: 0;
+            height: 100dvh; 
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* --- LOGIN SCREEN --- */
+        #login-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a1a1a;
+            display: flex; justify-content: center; align-items: center; z-index: 2000;
+        }
+        .login-card {
+            background: #242424; padding: 40px; border-radius: 12px;
+            text-align: center; width: 90%; max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .zoom-btn-lg {
+            background: var(--accent-blue); color: white; border: none;
+            padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: 600;
+            cursor: pointer; width: 100%; margin-top: 15px;
+        }
+        input {
+            width: 100%; padding: 12px; margin: 10px 0; background: #fff;
+            border: 1px solid #ccc; border-radius: 8px; font-size: 16px; outline: none;
+        }
+
+        /* --- MAIN LAYOUT --- */
+        #app-container {
+            display: none; flex-direction: column; height: 100%; width: 100%;
+        }
+
+        /* TOP BAR (View Switcher) */
+        .top-bar {
+            height: 40px; display: flex; align-items: center; justify-content: flex-end;
+            padding: 0 15px; background: black; position: absolute; top:0; left:0; right:0; z-index: 50;
+        }
+        .view-btn {
+            background: #242424; color: white; border: 1px solid #444;
+            padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+            display: flex; align-items: center; gap: 5px;
+        }
+        .view-btn:hover { background: #333; }
+
+        /* VIDEO AREA */
+        #video-stage {
+            flex: 1; background: black; position: relative;
+            display: flex; justify-content: center; align-items: center;
+            overflow: hidden; margin-top: 40px; /* Space for top bar */
+        }
+
+        /* --- GALLERY VIEW (Default) --- */
+        #gallery-container {
+            display: flex; flex-wrap: wrap; justify-content: center; align-content: center;
+            width: 100%; height: 100%; gap: 10px; padding: 10px; overflow-y: auto;
+        }
+
+        /* --- SPEAKER VIEW --- */
+        #speaker-container {
+            display: none; width: 100%; height: 100%; flex-direction: column;
+        }
+        #main-speaker {
+            flex: 1; background: #111; position: relative; display: flex;
+            justify-content: center; align-items: center; padding: 5px;
+        }
+        #filmstrip {
+            height: 120px; background: black; display: flex; align-items: center;
+            gap: 10px; padding: 10px; overflow-x: auto; flex-shrink: 0;
+            border-top: 1px solid #333;
+        }
+
+        /* VIDEO CARDS */
+        .video-card {
+            position: relative; background: #1a1a1a; border-radius: 4px; overflow: hidden;
+            border: 1px solid #333; aspect-ratio: 16/9;
+            width: 300px; max-width: 100%; display: flex; justify-content: center; align-items: center;
+        }
+        /* Dynamic Sizing in Gallery */
+        .gallery-mode .video-card {
+            flex-grow: 1; width: 45%; max-width: 480px; min-width: 250px;
+        }
+        @media (max-width: 600px) { .gallery-mode .video-card { width: 100%; } }
+
+        /* Speaker Mode Styling */
+        #main-speaker .video-card {
+            width: 100%; height: 100%; border: none; aspect-ratio: auto;
+        }
+        #filmstrip .video-card {
+            width: 160px; height: 90px; flex-shrink: 0;
+        }
+
+        video { width: 100%; height: 100%; object-fit: contain; background: black; }
+        .mirror { transform: scaleX(-1); }
+
+        .name-tag {
+            position: absolute; bottom: 5px; left: 5px;
+            background: rgba(0,0,0,0.6); padding: 2px 8px;
+            border-radius: 4px; font-size: 12px; font-weight: 500;
+            pointer-events: none;
+        }
+        .mute-icon {
+            position: absolute; bottom: 5px; right: 5px; color: #E02828; font-size: 12px;
+            background: rgba(0,0,0,0.6); padding: 4px; border-radius: 50%;
+        }
+
+        /* Hand Raise & Reactions */
+        .hand-badge {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(0,0,0,0.6); color: #FFD700;
+            padding: 5px; border-radius: 50%; font-size: 20px;
+            display: none;
+        }
+        .reaction-float {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            font-size: 40px; animation: floatUp 2s ease-out forwards;
+            pointer-events: none; z-index: 100;
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translate(-50%, 0) scale(0.5); }
+            50% { opacity: 1; transform: translate(-50%, -50px) scale(1.2); }
+            100% { opacity: 0; transform: translate(-50%, -100px) scale(1); }
+        }
+
+        /* --- BOTTOM TOOLBAR --- */
+        .toolbar {
+            height: var(--toolbar-height); background: #1a1a1a;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 10px; gap: 5px; z-index: 100;
+            border-top: 1px solid #333;
+        }
+
+        .tool-btn {
+            background: transparent; border: none; color: #aaa;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            font-size: 11px; cursor: pointer; min-width: 60px; padding: 5px;
+            border-radius: 8px; transition: 0.2s;
+        }
+        .tool-btn:hover { background: #333; }
+        .tool-btn i { font-size: 20px; margin-bottom: 5px; }
+        
+        .tool-btn.active i { color: var(--accent-blue); }
+        .tool-btn.red-icon i { color: var(--danger); }
+        
+        .share-btn i { color: #2D8C5F; }
+        .share-btn.sharing { background: rgba(45, 140, 95, 0.2); }
+        .share-btn.sharing i { color: #00ff00; text-shadow: 0 0 10px #00ff00; }
+
+        .end-btn { color: #E02828; margin-left: auto; }
+        .end-btn:hover { background: #330000; }
+
+        /* --- MENUS --- */
+        .popup-menu {
+            position: absolute; bottom: 80px; background: #242424;
+            border-radius: 8px; padding: 10px; display: none;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 200;
+            min-width: 150px;
+        }
+        .popup-menu.show { display: block; }
+        
+        /* Reaction Menu */
+        #reaction-menu { left: 50%; transform: translateX(-50%); display: none; flex-direction: row; gap: 10px; }
+        #reaction-menu.show { display: flex; }
+        .emoji-btn { background: none; border: none; font-size: 24px; cursor: pointer; transition: 0.2s; }
+        .emoji-btn:hover { transform: scale(1.2); }
+
+        /* Participant Sidebar (Simple Overlay) */
+        .sidebar {
+            position: fixed; right: 0; top: 40px; bottom: 72px; width: 300px;
+            background: white; transform: translateX(100%); transition: 0.3s; z-index: 150;
+            display: flex; flex-direction: column; border-left: 1px solid #ccc;
+        }
+        .sidebar.open { transform: translateX(0); }
+        .sidebar-header { padding: 15px; border-bottom: 1px solid #eee; font-weight: bold; color: black; display: flex; justify-content: space-between; }
+        .list-content { flex: 1; overflow-y: auto; padding: 10px; color: #333; }
+        
+        .part-item { padding: 10px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+        .part-item i { color: #666; margin-right: 8px; }
+
+        /* Toast */
+        #toast {
+            position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+            border-radius: 20px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Hidden Video Processing -->
+    <video id="local-raw-video" autoplay playsinline muted style="display:none;"></video>
+    <video id="local-screen-video" autoplay playsinline muted style="display:none;"></video>
+    <canvas id="broadcast-canvas" style="display:none;"></canvas>
+
+    <!-- Login -->
+    <div id="login-screen">
+        <div class="login-card">
+            <h1 style="color:white; margin-bottom: 10px;">Join Meeting</h1>
+            <p style="color:#aaa; font-size:14px; margin-bottom:20px;">Video Conferencing</p>
+            <input type="text" id="username" placeholder="Your Name" autocomplete="off">
+            <button class="zoom-btn-lg" onclick="initMeeting()">Join Meeting</button>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app-container">
+        
+        <!-- Top Controls -->
+        <div class="top-bar">
+            <div id="room-info" style="color:white; font-size:13px; margin-right:auto; display:flex; gap:10px;">
+                <i class="fas fa-shield-alt" style="color:#0f0;"></i> 
+                <span>Zoom Clone ID: <span id="display-room-id">...</span></span>
+                <i class="far fa-copy" onclick="copyInvite()" style="cursor:pointer; padding:0 5px;"></i>
+            </div>
+            <button class="view-btn" onclick="toggleViewMode()">
+                <i class="fas fa-th-large"></i> <span id="view-label">View</span>
+            </button>
+        </div>
+
+        <div id="toast">Notification</div>
+
+        <!-- Video Stage -->
+        <div id="video-stage">
+            
+            <!-- Gallery View (Grid) -->
+            <div id="gallery-container" class="gallery-mode"></div>
+
+            <!-- Speaker View -->
+            <div id="speaker-container">
+                <div id="main-speaker">
+                    <!-- Active speaker video goes here -->
+                    <div style="color:white;">Waiting for participants...</div>
+                </div>
+                <div id="filmstrip">
+                    <!-- Thumbnails go here -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Bottom Toolbar -->
+        <div class="toolbar">
+            <button class="tool-btn" id="btn-audio" onclick="toggleAudio()">
+                <i class="fas fa-microphone"></i> <span>Mute</span>
+            </button>
+            
+            <button class="tool-btn" id="btn-video" onclick="toggleVideo()">
+                <i class="fas fa-video"></i> <span>Stop Video</span>
+            </button>
+
+            <button class="tool-btn" onclick="toggleSidebar('participants')">
+                <i class="fas fa-user-friends"></i> <span>Participants</span>
+            </button>
+
+            <div style="position:relative;">
+                <button class="tool-btn share-btn" id="btn-share" onclick="toggleScreenShare()">
+                    <i class="fas fa-arrow-up-from-bracket"></i> <span>Share Screen</span>
+                </button>
+            </div>
+
+            <div style="position:relative;">
+                <button class="tool-btn" onclick="toggleReactionMenu()">
+                    <i class="far fa-smile"></i> <span>Reactions</span>
+                </button>
+                <div id="reaction-menu" class="popup-menu">
+                    <button class="emoji-btn" onclick="sendReaction('👏')">👏</button>
+                    <button class="emoji-btn" onclick="sendReaction('👍')">👍</button>
+                    <button class="emoji-btn" onclick="sendReaction('❤️')">❤️</button>
+                    <button class="emoji-btn" onclick="sendReaction('😂')">😂</button>
+                    <button class="emoji-btn" onclick="sendReaction('😮')">😮</button>
+                    <button class="emoji-btn" onclick="sendReaction('🎉')">🎉</button>
+                    <div style="width:1px; background:#444; margin:0 5px;"></div>
+                    <button class="emoji-btn" id="btn-hand" onclick="toggleHand()" style="font-size:14px; width:auto; padding:0 10px; border:1px solid #444; border-radius:4px; color:#ddd;">Raise Hand</button>
+                </div>
+            </div>
+
+            <button class="tool-btn end-btn" onclick="leaveMeeting()">
+                <i class="fas fa-phone-slash"></i> <span>End</span>
+            </button>
+        </div>
+
+        <!-- Sidebars -->
+        <div id="sidebar-participants" class="sidebar">
+            <div class="sidebar-header">
+                <span>Participants</span>
+                <i class="fas fa-times" onclick="closeSidebar()" style="cursor:pointer"></i>
+            </div>
+            <div class="list-content" id="participants-list"></div>
+        </div>
+    </div>
+
+    <script>
+        /* --- CONFIG --- */
+        const peerConfig = { debug: 1 };
+        
+        /* --- STATE --- */
+        let peer, myId, myName;
+        let myStreamCanvas; // The stream we send (Canvas captured)
+        let rawCamStream;   // The raw camera input
+        let screenStream;   // The raw screen share input
+        
+        let isSharing = false;
+        let isAudioEnabled = true;
+        let isVideoEnabled = true;
+        let isHandRaised = false;
+        let viewMode = 'gallery'; // 'gallery' or 'speaker'
+
+        let peers = {}; // Connection objects
+        let calls = {}; // Media calls
+        let peerMetadata = {}; // { id: { name, handRaised, isSharing } }
+
+        /* --- DOM ELEMENTS --- */
+        const rawVideoEl = document.getElementById('local-raw-video');
+        const screenVideoEl = document.getElementById('local-screen-video');
+        const canvasEl = document.getElementById('broadcast-canvas');
+        const ctx = canvasEl.getContext('2d', { willReadFrequently: true });
+        
+        /* --- INITIALIZATION --- */
+        const urlParams = new URLSearchParams(window.location.search);
+        let roomId = urlParams.get('room');
+
+        async function initMeeting() {
+            const nameInput = document.getElementById('username');
+            if (!nameInput.value.trim()) return alert("Please enter your name");
+            myName = nameInput.value;
+
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+
+            try {
+                // 1. Get Camera
+                rawCamStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 360, frameRate: 24 }, 
+                    audio: { echoCancellation: true, noiseSuppression: true } 
+                });
+                rawVideoEl.srcObject = rawCamStream;
+
+                // 2. Start Canvas Compositor (The "Magic" that allows switching between Cam/Screen)
+                startCompositor();
+                const streamFromCanvas = canvasEl.captureStream(24);
+                // Add audio track to canvas stream
+                const audioTrack = rawCamStream.getAudioTracks()[0];
+                if(audioTrack) streamFromCanvas.addTrack(audioTrack);
+                
+                myStreamCanvas = streamFromCanvas;
+
+                // 3. Init Peer
+                peer = new Peer(undefined, peerConfig);
+
+                peer.on('open', id => {
+                    myId = id;
+                    document.getElementById('display-room-id').innerText = roomId || id;
+                    
+                    // Add Self Video
+                    addVideoCard(myId, myStreamCanvas, true);
+                    updateParticipantList();
+
+                    if (roomId) {
+                        connectToRoom(roomId);
+                    } else {
+                        // We are host
+                        window.history.pushState({}, '', '?room=' + myId);
+                    }
+                });
+
+                peer.on('connection', handleDataConnection);
+                peer.on('call', handleMediaCall);
+
+            } catch (err) {
+                alert("Error accessing camera/mic: " + err.message);
+            }
+        }
+
+        /* --- COMPOSITOR (Mixing Video Sources) --- */
+        function startCompositor() {
+            function draw() {
+                // Resize canvas if needed
+                const w = 640; 
+                const h = 360;
+                if (canvasEl.width !== w) { canvasEl.width = w; canvasEl.height = h; }
+
+                ctx.fillStyle = "#000";
+                ctx.fillRect(0,0,w,h);
+
+                if (isSharing && screenVideoEl.readyState === 4) {
+                    // Draw Screen (No Mirror)
+                    // Aspect Ratio Logic can be added here, for now stretch to fit or letterbox
+                    ctx.drawImage(screenVideoEl, 0, 0, w, h);
+                } else if (isVideoEnabled && rawVideoEl.readyState === 4) {
+                    // Draw Camera (Mirror)
+                    ctx.save();
+                    ctx.translate(w, 0);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(rawVideoEl, 0, 0, w, h);
+                    ctx.restore();
+                } else {
+                    // Video Off Placeholder
+                    ctx.fillStyle = "#222";
+                    ctx.fillRect(0,0,w,h);
+                    ctx.fillStyle = "#fff";
+                    ctx.font = "30px Arial";
+                    ctx.textAlign = "center";
+                    ctx.fillText(myName.charAt(0).toUpperCase(), w/2, h/2 + 10);
+                }
+                requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        /* --- PEER LOGIC --- */
+        function connectToRoom(hostId) {
+            const conn = peer.connect(hostId, { metadata: { name: myName } });
+            handleDataConnection(conn);
+        }
+
+        function handleDataConnection(conn) {
+            peers[conn.peer] = conn;
+            
+            conn.on('open', () => {
+                // If we connected to someone, call them
+                if (!calls[conn.peer]) {
+                    const call = peer.call(conn.peer, myStreamCanvas, { metadata: { name: myName } });
+                    handleMediaCall(call);
+                }
+                
+                // If I am host (roomId is myId), I should tell new person about others?
+                // For this simple mesh, we rely on user sharing link manually or full mesh logic.
+                // Keeping it simple: 1-to-1 or Star topology centered on host.
+                // NOTE: PeerJS default mesh is hard without a server. 
+                // We will assume "Star" topology where new users connect to Host, 
+                // and Host *could* introduce them, but for this snippet, 
+                // we'll stick to basic connectivity.
+                
+                sendState(conn); // Send my initial state (hand raised? name?)
+            });
+
+            conn.on('data', data => {
+                handleIncomingData(conn.peer, data);
+            });
+
+            conn.on('close', () => removePeer(conn.peer));
+        }
+
+        function handleMediaCall(call) {
+            calls[call.peer] = call;
+            call.answer(myStreamCanvas); // Answer with our stream
+
+            call.on('stream', remoteStream => {
+                // Wait for metadata via data channel usually, or use call metadata
+                const remoteName = call.metadata ? call.metadata.name : "User";
+                peerMetadata[call.peer] = { ...peerMetadata[call.peer], name: remoteName };
+                addVideoCard(call.peer, remoteStream, false);
+                updateParticipantList();
+            });
+
+            call.on('close', () => removePeer(call.peer));
+        }
+
+        function handleIncomingData(id, data) {
+            if (!peerMetadata[id]) peerMetadata[id] = {};
+
+            switch(data.type) {
+                case 'state':
+                    peerMetadata[id] = { ...peerMetadata[id], ...data.payload };
+                    updatePeerUI(id);
+                    updateParticipantList();
+                    break;
+                case 'reaction':
+                    showFloatingReaction(id, data.emoji);
+                    break;
+                case 'chat':
+                    showToast(`${peerMetadata[id].name}: ${data.msg}`);
+                    break;
+            }
+        }
+
+        function sendState(conn) {
+            const payload = { 
+                name: myName, 
+                handRaised: isHandRaised,
+                isSharing: isSharing
+            };
+            if(conn) conn.send({ type: 'state', payload });
+            else broadcast({ type: 'state', payload });
+        }
+
+        function broadcast(data) {
+            Object.values(peers).forEach(conn => {
+                if (conn.open) conn.send(data);
+            });
+        }
+
+        function removePeer(id) {
+            if (document.getElementById(`vid-${id}`)) document.getElementById(`vid-${id}`).remove();
+            if (document.getElementById(`thumb-${id}`)) document.getElementById(`thumb-${id}`).remove();
+            delete peers[id];
+            delete calls[id];
+            delete peerMetadata[id];
+            updateParticipantList();
+            refreshLayout();
+        }
+
+        /* --- VIDEO UI --- */
+        function addVideoCard(id, stream, isLocal) {
+            if (document.getElementById(`vid-${id}`)) return;
+
+            // 1. Create Card HTML
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.id = `vid-${id}`;
+            
+            const vid = document.createElement('video');
+            vid.srcObject = stream;
+            vid.autoplay = true; vid.playsInline = true;
+            if (isLocal) vid.muted = true;
+            // Mirror logic handled in canvas for local, but remote might need CSS mirror if they send raw cam?
+            // Usually we don't mirror remote.
+            
+            const nameTag = document.createElement('div');
+            nameTag.className = 'name-tag';
+            nameTag.innerText = isLocal ? "You" : (peerMetadata[id]?.name || "Guest");
+
+            const handIcon = document.createElement('div');
+            handIcon.className = 'hand-badge';
+            handIcon.id = `hand-${id}`;
+            handIcon.innerHTML = '<i class="fas fa-hand-paper"></i>';
+
+            card.appendChild(vid);
+            card.appendChild(nameTag);
+            card.appendChild(handIcon);
+
+            // 2. Add to Grid
+            document.getElementById('gallery-container').appendChild(card);
+
+            // 3. Refresh Layout
+            refreshLayout();
+        }
+
+        function refreshLayout() {
+            const gallery = document.getElementById('gallery-container');
+            const speaker = document.getElementById('main-speaker');
+            const filmstrip = document.getElementById('filmstrip');
+            
+            // Move all cards based on mode
+            const cards = Array.from(document.querySelectorAll('.video-card'));
+            
+            if (viewMode === 'gallery') {
+                document.getElementById('speaker-container').style.display = 'none';
+                document.getElementById('gallery-container').style.display = 'flex';
+                
+                cards.forEach(c => gallery.appendChild(c));
+            } else {
+                document.getElementById('gallery-container').style.display = 'none';
+                document.getElementById('speaker-container').style.display = 'flex';
+                
+                // Pick active speaker (Logic: Local is never main unless alone, sharing gets priority)
+                // For simplicity: The last person who joined/spoke or manually pinned.
+                // Let's just pick the first remote user, or self if alone.
+                let mainId = myId;
+                const remoteIds = Object.keys(peers);
+                if (remoteIds.length > 0) mainId = remoteIds[0]; // Simple logic
+
+                // Find user who is sharing
+                const sharer = Object.keys(peerMetadata).find(pid => peerMetadata[pid].isSharing);
+                if (sharer) mainId = sharer;
+                if (isSharing) mainId = myId;
+
+                cards.forEach(c => {
+                    const id = c.id.replace('vid-', '');
+                    if (id === mainId) speaker.appendChild(c);
+                    else filmstrip.appendChild(c);
+                });
+            }
+        }
+
+        function updatePeerUI(id) {
+            // Update Hand
+            const handEl = document.getElementById(`hand-${id}`);
+            if (handEl) {
+                handEl.style.display = peerMetadata[id].handRaised ? 'block' : 'none';
+            }
+            // Re-check layout if sharing status changed
+            if (peerMetadata[id].isSharing) {
+                viewMode = 'speaker';
+                refreshLayout();
+            }
+        }
+
+        /* --- CONTROLS IMPLEMENTATION --- */
+
+        async function toggleScreenShare() {
+            const btn = document.getElementById('btn-share');
+            
+            if (isSharing) {
+                // Stop Sharing
+                isSharing = false;
+                const tracks = screenStream.getTracks();
+                tracks.forEach(t => t.stop());
+                screenStream = null;
+                btn.classList.remove('sharing');
+                btn.querySelector('span').innerText = "Share Screen";
+                sendState();
+                refreshLayout();
+            } else {
+                // Start Sharing
+                try {
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                    screenVideoEl.srcObject = screenStream;
+                    isSharing = true;
+                    btn.classList.add('sharing');
+                    btn.querySelector('span').innerText = "Stop Share";
+                    
+                    // Handle system "Stop" button
+                    screenStream.getVideoTracks()[0].onended = () => {
+                        if(isSharing) toggleScreenShare(); 
+                    };
+
+                    sendState();
+                    // Force Speaker View
+                    viewMode = 'speaker';
+                    refreshLayout();
+                } catch (e) {
+                    console.log("Cancelled share");
+                }
+            }
+        }
+
+        function toggleAudio() {
+            isAudioEnabled = !isAudioEnabled;
+            const btn = document.getElementById('btn-audio');
+            // Toggle actual track
+            const tracks = rawCamStream.getAudioTracks();
+            if(tracks.length) tracks[0].enabled = isAudioEnabled;
+            
+            // Visuals
+            if (isAudioEnabled) {
+                btn.classList.remove('red-icon');
+                btn.innerHTML = '<i class="fas fa-microphone"></i> <span>Mute</span>';
+            } else {
+                btn.classList.add('red-icon');
+                btn.innerHTML = '<i class="fas fa-microphone-slash"></i> <span>Unmute</span>';
+            }
+        }
+
+        function toggleVideo() {
+            isVideoEnabled = !isVideoEnabled;
+            const btn = document.getElementById('btn-video');
+            
+            if (isVideoEnabled) {
+                btn.classList.remove('red-icon');
+                btn.innerHTML = '<i class="fas fa-video"></i> <span>Stop Video</span>';
+            } else {
+                btn.classList.add('red-icon');
+                btn.innerHTML = '<i class="fas fa-video-slash"></i> <span>Start Video</span>';
+            }
+            // Note: We don't stop the track because the canvas compositor handles the "Black screen" logic. 
+            // This prevents PeerJS connection flickers.
+        }
+
+        function toggleReactionMenu() {
+            document.getElementById('reaction-menu').classList.toggle('show');
+        }
+
+        function sendReaction(emoji) {
+            document.getElementById('reaction-menu').classList.remove('show');
+            showFloatingReaction(myId, emoji);
+            broadcast({ type: 'reaction', emoji: emoji });
+        }
+
+        function showFloatingReaction(id, emoji) {
+            const card = document.getElementById(`vid-${id}`);
+            if (!card) return;
+            
+            const el = document.createElement('div');
+            el.className = 'reaction-float';
+            el.innerText = emoji;
+            card.appendChild(el);
+            setTimeout(() => el.remove(), 2000);
+        }
+
+        function toggleHand() {
+            isHandRaised = !isHandRaised;
+            const btn = document.getElementById('btn-hand');
+            btn.innerText = isHandRaised ? "Lower Hand" : "Raise Hand";
+            btn.style.color = isHandRaised ? "#FFD700" : "#ddd";
+            
+            document.getElementById('reaction-menu').classList.remove('show');
+            
+            // Local UI
+            const myHand = document.getElementById(`hand-${myId}`);
+            if(myHand) myHand.style.display = isHandRaised ? 'block' : 'none';
+            
+            sendState();
+        }
+
+        function toggleViewMode() {
+            viewMode = (viewMode === 'gallery') ? 'speaker' : 'gallery';
+            document.getElementById('view-label').innerText = (viewMode === 'gallery') ? 'Speaker View' : 'Gallery View';
+            refreshLayout();
+        }
+
+        function copyInvite() {
+            const url = window.location.href.split('?')[0] + '?room=' + (roomId || myId);
+            navigator.clipboard.writeText(url);
+            showToast("Invite Link Copied!");
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.style.opacity = 1;
+            setTimeout(() => t.style.opacity = 0, 3000);
+        }
+
+        function leaveMeeting() {
+            if(confirm("Leave Meeting?")) {
+                window.location.href = window.location.pathname;
+            }
+        }
+
+        /* --- SIDEBAR --- */
+        function toggleSidebar(type) {
+            document.querySelector('.sidebar').classList.add('open');
+            updateParticipantList();
+        }
+        function closeSidebar() {
+            document.querySelector('.sidebar').classList.remove('open');
+        }
+        function updateParticipantList() {
+            const list = document.getElementById('participants-list');
+            list.innerHTML = '';
+            
+            // Me
+            list.innerHTML += `<div class="part-item">
+                <span><i class="fas fa-video"></i> ${myName} (You)</span>
+                ${isHandRaised ? '<i class="fas fa-hand-paper" style="color:#FFD700"></i>' : ''}
+            </div>`;
+
+            // Others
+            Object.keys(peerMetadata).forEach(id => {
+                const meta = peerMetadata[id];
+                list.innerHTML += `<div class="part-item">
+                    <span><i class="fas fa-video"></i> ${meta.name || "Guest"}</span>
+                    ${meta.handRaised ? '<i class="fas fa-hand-paper" style="color:#FFD700"></i>' : ''}
+                </div>`;
+            });
+        }
+
+        // Close menus on click outside
+        window.onclick = function(event) {
+            if (!event.target.closest('.tool-btn') && !event.target.closest('.popup-menu')) {
+                document.querySelectorAll('.popup-menu').forEach(el => el.classList.remove('show'));
+            }
+        }
+
+    </script>
+</body>
+</html>
